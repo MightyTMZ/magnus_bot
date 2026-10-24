@@ -5,7 +5,7 @@ Keep it under ~200 lines by summarizing old entries. Never delete decisions — 
 
 ## Status
 Milestone **M0 (scaffold + tests green)**: COMPLETE. No hardware has been driven by magnus_bot
-code yet. **100 tests pass, 1 skip** (placo cross-check, needs the `ik` env); ruff clean on
+code yet. **116 tests pass, 1 skip** (placo cross-check, needs the `ik` env); ruff clean on
 `src/ tests/ scripts/` (`RF-DETR/` has 7 lint findings).
 **M1 Phase 0 (2026-10-24):** 0a env built (lerobot + serial-motors + magnus_bot[hardware] in
 `C:\projects\lerobot\.venv`). 0b done (URDF link lengths in `SO101Model`; nominal limits in
@@ -19,8 +19,29 @@ per-piece `gripper_closed` (see Open questions) + the non-king piece dims.
 Live still refuses until 1b (URDF <-> servo, needs the rig).
 **M2 step 3 (2026-10-24):** reachability map + `reach_report.py` done (top-down IK).
 **M1 1b tooling (2026-10-24):** `scripts/joint_zero_check.py` + `ServoMap` ready; needs the rig.
+**First real motion + REACH fix (2026-10-24):** both arms driven read-only + gentle self-test
+(PASS 12/12). Implemented the tilted-tool IK (the REACH fix) and the approach-collision guard.
 
-## Last session (2026-10-24, Lucas, part 4) — tooling for step 1b
+## Last session (2026-10-24, Alex + Claude) — real motion + tilted-tool IK + collision
+- **First real motion:** both arms via `scripts/hardware_selftest.py` — read-only `baseline` OK,
+  gentle `test` PASS 12/12 (each joint nudged ~8° and returned <0.4°). Physical chain confirmed
+  (power/USB/LeRobot/calibration). LeRobot's `max_relative_target` clamp fires on `wrist_flex` at
+  the near-limit rest pose (benign). Rest pose sits near elbow/shoulder_lift limits — fine for the
+  interior-only self-test, but IK-driven poses must stay off those extremes.
+- **Tilted-tool IK (implements the leading REACH fix, Known issues / old next-step 4):**
+  `so101_ik.inverse(pitch=…)` + `link_points`; `reach.reach_pose` / `compute_reachability(max_pitch=…)`
+  pick the SMALLEST tilt per square ("lean as little as possible") and record a per-square
+  `GraspPose`. Default `max_pitch=0` keeps the top-down map (all existing reach tests unchanged);
+  tilt is opt-in and not yet the default map/executor path.
+- **Approach-collision guard (the knock-over risk the REACH issue flagged):** `motion/collision.py`
+  — arm link polyline vs. standing-piece cylinders; `approach_clears` samples the descent;
+  `min_clear_pitch` = smallest tilt that reaches AND stays clear. Runtime check (live board), NOT
+  baked into the static reach map.
+- Branch `feat/reach-pitch-collision` off origin/main. 116 pass / 1 skip, ruff clean.
+- NOTE: an earlier local attempt built the same ideas on a stale `main` (pre-pull) and also added
+  `scripts/fk_probe.py` — superseded by `joint_zero_check.py`, so dropped in this integration.
+
+## Earlier session (2026-10-24, Lucas, part 4) — tooling for step 1b
 - `kinematics/conventions.py`: `ServoMap` (per-arm `servo = sign·urdf + offset`, radians),
   `urdf_to_servo` / `servo_to_urdf` / `model_to_servo` (the live `to_command`), `servo_limits`
   (URDF limits in servo angles), JSON load/save, and `fit_servo_map` (sign from each nudge's
@@ -75,10 +96,13 @@ Live still refuses until 1b (URDF <-> servo, needs the rig).
    Needs `--live` + operator approval + `measured: true`.
 3. ~~M2 — reachability~~ DONE 2026-10-24 (`reach_report.py`), except wiring the cached map
    into the CLI/demo, which waits for step 4.
-4. **Decide the REACH fix** (team; see Known issues). Top-down cannot hover high enough
-   anywhere, so this blocks real games. Leading option: tilted-tool IK (≤ 40° tilt covers
-   every square at 14 cm, ≤ 22° at grasp height), optionally with risers. Then re-plan the
-   handoff pad (no off-board point is reachable by both arms in any variant tried).
+4. **REACH fix — tilted-tool IK: IMPLEMENTED (opt-in), now INTEGRATE.** `inverse(pitch=…)` +
+   `compute_reachability(max_pitch=…)` + `motion/collision.py` exist (see Last session). Remaining:
+   (a) choose the default `max_pitch` and flip the cached map / `reach_report.py` / assigner to use
+   it (today everything still defaults to top-down); (b) wire `rmap.pose()` pitch + the collision
+   check into the executor's descend/lift (and add Cartesian DESCEND/LIFT sub-waypoints, since the
+   min-jerk descent strays ~3.5 mm); (c) re-plan the handoff pad (still no point reachable by both
+   arms; risers help — `reach_report.py --riser 0.06`).
 5. Replace the BIN/STASH "any arm" assumption in `planning/assigner.py` with measured reach.
 6. M4: wrap `RF-DETR/` behind `BoardSource` so the orchestrator owns game state and reads the
    camera only when both arms are at rest.
@@ -114,6 +138,12 @@ Live still refuses until 1b (URDF <-> servo, needs the rig).
 - 2026-10-24: Three joint conventions (IK model / URDF zero / servo). IK stays in its model
   convention; `kinematics/conventions.py` maps to URDF zero, where limits are checked. Sim
   commands URDF-zero angles.
+- 2026-10-24: REACH fix = **tilted-tool IK with a "lean as little as possible" policy** (smallest
+  pitch per square), NOT a top-down-only system. Approach pitch is a property of the SQUARE
+  (geometry, derived by reach.py); grip firmness is a property of the PIECE (6 measured %s). The
+  executor composes them (~per-square pitch + 6 grips), never a per-(piece×square) table.
+- 2026-10-24: Piece-collision is checked at EXECUTION time against the live board
+  (`motion/collision.py`), not baked into the static reach map (occupancy changes every move).
 
 ## Known issues
 - **REACH (2026-10-24, open, blocking).** Updated after step 1a (shoulder offset + URDF
@@ -141,6 +171,9 @@ Live still refuses until 1b (URDF <-> servo, needs the rig).
     (e1/e8) is 0.333 m from the base.
   - Consequence today: sim tests use h4h5 with a 6 cm z_clear; the rig config raises
     `JointLimitError` at hover (pinned by `test_rig_z_clear_breaks_the_wrist_limit_top_down`).
+  - UPDATE 2026-10-24: the tilted-tool IK + collision guard are now implemented (opt-in; see Last
+    session + next-step 4). Still OPEN until the default map/executor use tilt and the pad is
+    re-planned; a 6 cm riser likely still wanted to keep tilt angles modest.
 - RESOLVED 2026-10-24 — sim used wide test limits (IK angles vs. servo placeholders); now
   `model_to_urdf` + URDF limits.
 - RESOLVED 2026-10-24 — IK `elbow="up"` returned the elbow-down branch (see Last session).
@@ -161,6 +194,24 @@ Live still refuses until 1b (URDF <-> servo, needs the rig).
   HF cache. The repo copy `hardware/calibration/follower_1.calibration.bak.json` is PRE-REMAP and
   OBSOLETE — do not derive limits from it; re-export from the new calibration if needed.
 - Supply voltages: TODO (operator).
+
+## Environment setup (new device)
+TWO separate environments — the core never imports lerobot (keeps sim/tests portable).
+- **Core / dev / sim — any device, no hardware.** Prereqs: git, `uv`, Python 3.13.
+  `git clone https://github.com/MightyTMZ/magnus_bot.git && cd magnus_bot`;
+  `uv venv --python 3.13 .venv`; `uv pip install --python .venv -e ".[dev]"`. Then
+  `.venv/Scripts/python -m pytest` (expect 116 pass / 1 skip) and `-m ruff check src tests`.
+  Runs tests, sim (`magnus-bot info` / `demo-move`), reach + collision. macOS/Linux: `.venv/bin/`.
+- **Hardware — ONLY the machine wired to the arms.** LeRobot lives in its OWN venv (this rig:
+  `C:\projects\lerobot\.venv`; path is rig-specific). Install LeRobot per its upstream docs
+  (Python 3.10+, Feetech/serial backend) [confirm exact steps w/ repo owner], then install
+  magnus_bot into that same venv (`pip install -e <path>`, lerobot already present). Ports in
+  `configs/arms.yaml` (COM3/COM4). Per-arm calibration is device-specific and NOT in the repo —
+  it lives in the HF cache (`~/.cache/huggingface/lerobot/calibration/robots/so_follower/<id>.json`);
+  on a new rig calibrate each arm (`lerobot-calibrate --robot.id=follower_1`, then `follower_2`).
+  The repo's `hardware/calibration/*.bak.json` is a PRE-remap reference — OBSOLETE for limits.
+  Read-only bring-up (needs neither `measured:true` nor `--live`):
+  `scripts/hardware_selftest.py baseline` and `scripts/joint_zero_check.py --arm follower_1`.
 
 ## Command cheatsheet
 - Tests: `.venv/Scripts/python -m pytest` (Windows) · `.venv/bin/python -m pytest` (macOS/Linux)
