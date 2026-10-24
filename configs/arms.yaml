@@ -1,0 +1,36 @@
+# Arm placement, motion limits, and per-arm hardware wiring.
+# Distances in meters, gripper in percent (0..100). PLACEHOLDER values until measured.
+#
+# Ports live here, never hardcoded. On Windows these are COM ports (one per arm).
+# Calibration ids map to LeRobot calibration files:
+#   ~/.cache/huggingface/lerobot/calibration/robots/so_follower/<calibration_id>.json
+
+# d: gap from each arm's base yaw axis to the near board edge. MEASURED 2026-10-24: 6.7 cm
+# (center of the base axis to the nearest square's edge == the board edge).
+edge_gap: 0.067
+
+# Default trajectory speed scale (0..1). Conservative by default.
+speed_scale: 0.3
+
+# Traverse height for the hover/traverse phases. MUST exceed the tallest piece + margin, AND
+# account for the piece hanging below the grasp point. Set 2026-10-24: king 9.9cm + ~1cm
+# clearance + 2.8cm pawn grasp offset => ~13.7cm, rounded to 14cm.
+z_clear: 0.140
+
+# Gripper height when grasping a piece standing on the board. MEASURED 2026-10-24 for the PAWN.
+# TODO(M2/M3): make grasp height per-piece-type (keyed like piece_heights) instead of one value.
+z_grasp: 0.028
+
+# Gripper positions (percent). gripper_open is a single safe-wide value. gripper_closed here is
+# the DEFAULT (pawn) hold; per-piece closed values live in board.yaml:gripper_closed_pct (they
+# differ by piece) and will supersede this default when per-piece grasp lands (M2/M3).
+gripper_open: 90.0       # PLACEHOLDER - measure with gripper_read.py (jaws fully open)
+gripper_closed: 25.0     # PLACEHOLDER - default/pawn hold; see board.yaml:gripper_closed_pct
+
+arms:
+  follower_1:
+    port: COM3            # beyond the h-file edge, facing -x (toward the a-file)
+    calibration_id: follower_1
+  follower_2:
+    port: COM4            # beyond the a-file edge, facing +x (toward the h-file)
+    calibration_id: follower_2

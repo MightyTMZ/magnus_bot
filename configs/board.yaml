@@ -1,0 +1,48 @@
+# Board geometry and piece dimensions (board frame B; SI meters).
+#
+# measured: GATE for live operation. While false, every value below is a PLACEHOLDER,
+# sim mode warns, and live mode refuses to run. Set to true ONLY after measuring the rig
+# and filling in the real numbers.
+measured: false
+
+# Edge length of one square (center-to-center spacing). MEASURED 2026-10-24: 5.7 cm.
+square_size: 0.057
+
+# a1 is a dark square (true for a standard board, with the robot playing White).
+dark_a1: true
+
+# The human plays this color and sits at the rank-8 edge; the robots play the other color
+# and move first. Flip to "white" to swap sides (code must support this).
+human_color: black
+
+# Piece heights (table to top). PLACEHOLDER — z_clear in arms.yaml must exceed the tallest
+# of these plus a margin.
+piece_heights:
+  pawn: 0.040    # PLACEHOLDER
+  knight: 0.055  # PLACEHOLDER
+  bishop: 0.060  # PLACEHOLDER
+  rook: 0.050    # PLACEHOLDER
+  queen: 0.075   # PLACEHOLDER
+  king: 0.099    # MEASURED 2026-10-24: 9.9 cm (tallest piece; drives z_clear)
+
+# Piece base diameters (for grip width and collision margins). PLACEHOLDER.
+piece_base_diameters:
+  pawn: 0.024    # PLACEHOLDER
+  knight: 0.028  # PLACEHOLDER
+  bishop: 0.028  # PLACEHOLDER
+  rook: 0.028    # PLACEHOLDER
+  queen: 0.032   # PLACEHOLDER
+  king: 0.034    # PLACEHOLDER
+
+# Gripper closing position (percent) that firmly holds each piece type. The hold value DIFFERS
+# per piece (base diameter), so it's recorded per type here. Measure each with
+# scripts/gripper_read.py (close on that piece). NOTE: not yet read by config.py — the single
+# arms.yaml:gripper_closed is used until per-piece grasp lands (M2/M3); this is the canonical
+# place to record the measured values now. Fill the nulls.
+gripper_closed_pct:
+  pawn: null     # TODO measure
+  knight: null   # TODO measure
+  bishop: null   # TODO measure
+  rook: null     # TODO measure
+  queen: null    # TODO measure
+  king: null     # TODO measure

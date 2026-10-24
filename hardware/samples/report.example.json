@@ -1,0 +1,50 @@
+[
+  {
+    "arm": "follower_1",
+    "joint": "gripper",
+    "planned": 8.0,
+    "peak_move": 6.95,
+    "return_error": 0.24,
+    "pass": true
+  },
+  {
+    "arm": "follower_1",
+    "joint": "wrist_roll",
+    "planned": 8.0,
+    "peak_move": 8.09,
+    "return_error": 0.09,
+    "pass": true
+  },
+  {
+    "arm": "follower_1",
+    "joint": "shoulder_pan",
+    "planned": 8.0,
+    "peak_move": 5.71,
+    "return_error": 0.26,
+    "pass": true
+  },
+  {
+    "arm": "follower_1",
+    "joint": "wrist_flex",
+    "planned": 8.0,
+    "peak_move": 7.65,
+    "return_error": 0.18,
+    "pass": true
+  },
+  {
+    "arm": "follower_1",
+    "joint": "elbow_flex",
+    "planned": 8.0,
+    "peak_move": 7.56,
+    "return_error": 0.26,
+    "pass": true
+  },
+  {
+    "arm": "follower_1",
+    "joint": "shoulder_lift",
+    "planned": 8.0,
+    "peak_move": 7.21,
+    "return_error": 0.18,
+    "pass": true
+  }
+]

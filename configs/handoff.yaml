@@ -1,0 +1,32 @@
+# Off-board poses: the handoff pad, per-arm capture bins, and the promotion stash.
+# Board frame B (meters); yaw in radians (null = top-down default grasp). PLACEHOLDER values.
+#
+# The pad is reachable by BOTH arms: when neither arm can reach both source and destination
+# of a move, arm A places the piece on the pad and arm B picks it up. scripts/reach_report.py
+# evaluates candidate pad positions and recommends one; fill that in here once measured.
+
+pad:
+  x: 0.200   # PLACEHOLDER
+  y: 0.200   # PLACEHOLDER
+  z: 0.020   # PLACEHOLDER
+  yaw: null
+
+# One bin per arm for pieces that arm captures (victim goes to the capturing side's bin).
+bins:
+  follower_1:
+    x: 0.450   # PLACEHOLDER
+    y: -0.080  # PLACEHOLDER
+    z: 0.020   # PLACEHOLDER
+    yaw: null
+  follower_2:
+    x: -0.050  # PLACEHOLDER
+    y: -0.080  # PLACEHOLDER
+    z: 0.020   # PLACEHOLDER
+    yaw: null
+
+# Where spare queens wait to be placed on a promotion.
+promotion_stash:
+  x: 0.200   # PLACEHOLDER
+  y: -0.080  # PLACEHOLDER
+  z: 0.020   # PLACEHOLDER
+  yaw: null
