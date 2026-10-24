@@ -33,3 +33,16 @@ piece_base_diameters:
   rook: 0.028    # PLACEHOLDER
   queen: 0.032   # PLACEHOLDER
   king: 0.034    # PLACEHOLDER
+
+# Gripper closing position (percent) that firmly holds each piece type. The hold value DIFFERS
+# per piece (base diameter), so it's recorded per type here. Measure each with
+# scripts/gripper_read.py (close on that piece). NOTE: not yet read by config.py — the single
+# arms.yaml:gripper_closed is used until per-piece grasp lands (M2/M3); this is the canonical
+# place to record the measured values now. Fill the nulls.
+gripper_closed_pct:
+  pawn: null     # TODO measure
+  knight: null   # TODO measure
+  bishop: null   # TODO measure
+  rook: null     # TODO measure
+  queen: null    # TODO measure
+  king: null     # TODO measure

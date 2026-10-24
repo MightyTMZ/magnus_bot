@@ -21,9 +21,11 @@ z_clear: 0.140
 # TODO(M2/M3): make grasp height per-piece-type (keyed like piece_heights) instead of one value.
 z_grasp: 0.028
 
-# Gripper open/closed positions (percent). PLACEHOLDER.
-gripper_open: 90.0     # PLACEHOLDER
-gripper_closed: 25.0   # PLACEHOLDER
+# Gripper positions (percent). gripper_open is a single safe-wide value. gripper_closed here is
+# the DEFAULT (pawn) hold; per-piece closed values live in board.yaml:gripper_closed_pct (they
+# differ by piece) and will supersede this default when per-piece grasp lands (M2/M3).
+gripper_open: 90.0       # PLACEHOLDER - measure with gripper_read.py (jaws fully open)
+gripper_closed: 25.0     # PLACEHOLDER - default/pawn hold; see board.yaml:gripper_closed_pct
 
 arms:
   follower_1:
