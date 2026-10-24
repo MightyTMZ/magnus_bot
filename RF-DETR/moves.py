@@ -40,6 +40,25 @@ def looks_like_move(expected, observed):
             arrived = True
     return left and arrived
 
+def is_rook_sacrifice(chess_board, move):
+    """Rook captures a pawn, knight, or bishop and can be taken back.
+
+    True on the rook's capture, before the recapture. A free lesser piece is not a sacrifice.
+    """
+    mover = chess_board.piece_at(move.from_square)
+    if mover is None or mover.piece_type != chess.ROOK or not chess_board.is_capture(move):
+        return False
+    captured = chess_board.piece_at(move.to_square)
+    if captured is None or captured.piece_type not in {chess.PAWN, chess.KNIGHT, chess.BISHOP}:
+        return False
+    after = chess_board.copy()
+    after.push(move)
+    rook_square = move.to_square
+    for reply in after.legal_moves:
+        if reply.to_square == rook_square and after.is_capture(reply):
+            return True
+    return False
+
 def find_move(chess_board, observed):
     """Return (move, illegal).
 

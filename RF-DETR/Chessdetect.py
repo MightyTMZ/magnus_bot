@@ -1,5 +1,6 @@
 import json
 import os
+import subprocess
 import time
 from collections import deque
 
@@ -10,13 +11,18 @@ from dotenv import load_dotenv
 from inference_sdk import InferenceHTTPClient
 
 from board import build_board, draw_grid, draw_points, load_homography
-from moves import find_move
+from moves import find_move, is_rook_sacrifice
+
+CLIP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "RookSacrifice.mp4")
+# Spoken line in RookSacrifice.mp4. Playback reads that file and does not write another.
+ROOK_TRANSCRIPT = "He sacrifices the rook!"
 
 game = chess.Board()
 history = deque(maxlen=3)
 moves_played = []
 notice = None
 seen_illegal = None
+quote = None
 
 load_dotenv()
 
@@ -55,10 +61,29 @@ def move_line(moves):
     return parts
 
 
-def draw_moves(frame, moves, notice=None):
+def play_rook_clip():
+    """Play the clip's audio. ffplay reads the mp4 in place and writes nothing."""
+    subprocess.Popen(
+        ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet", CLIP],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+
+
+def fit_text(text, font, scale, thickness, max_width):
+    while scale > 0.35:
+        width = cv2.getTextSize(text, font, scale, thickness)[0][0]
+        if width <= max_width:
+            return scale
+        scale -= 0.05
+    return scale
+
+
+def draw_moves(frame, moves, notice=None, quote=None):
     """Draw the game's moves along the bottom of the frame. SAN already includes captures (exd4)."""
     h, w = frame.shape[:2]
-    bar_h = 52
+    bar_h = 84 if quote and not notice else 52
     cv2.rectangle(frame, (0, h - bar_h), (w, h), (20, 20, 20), -1)
     if notice:
         cv2.putText(
@@ -77,6 +102,7 @@ def draw_moves(frame, moves, notice=None):
     font = cv2.FONT_HERSHEY_SIMPLEX
     scale = 0.7
     thickness = 2
+    move_y = h - 46 if quote else h - 16
     while len(parts) > 1:
         text = "   ".join(parts)
         width = cv2.getTextSize(text, font, scale, thickness)[0][0]
@@ -87,13 +113,25 @@ def draw_moves(frame, moves, notice=None):
     cv2.putText(
         frame,
         text,
-        (12, h - 16),
+        (12, move_y),
         font,
         scale,
         (255, 255, 255),
         thickness,
         cv2.LINE_AA,
     )
+    if quote:
+        q_scale = fit_text(quote, font, 0.6, 2, w - 24)
+        cv2.putText(
+            frame,
+            quote,
+            (12, h - 14),
+            font,
+            q_scale,
+            (0, 220, 255),
+            2,
+            cv2.LINE_AA,
+        )
     return frame
 
 
@@ -126,6 +164,15 @@ while True:
                 san = game.san(move)
                 moves_played.append(san)
                 print(san)
+                if is_rook_sacrifice(game, move):
+                    quote = ROOK_TRANSCRIPT
+                    print(quote)
+                    try:
+                        play_rook_clip()
+                    except OSError:
+                        print("Could not play RookSacrifice.mp4")
+                else:
+                    quote = None
                 game.push(move)
                 history.clear()
                 notice = None
@@ -147,7 +194,7 @@ while True:
     for (x, y) in saved_corners:
         cv2.circle(annotated, (x, y), 8, (255, 0, 255), -1)
 
-    annotated = draw_moves(annotated, moves_played, notice)
+    annotated = draw_moves(annotated, moves_played, notice, quote)
 
     cv2.imshow("Chess Detection", annotated)
 
