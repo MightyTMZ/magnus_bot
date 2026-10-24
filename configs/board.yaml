@@ -5,8 +5,8 @@
 # and filling in the real numbers.
 measured: false
 
-# Edge length of one square (center-to-center spacing). PLACEHOLDER.
-square_size: 0.050
+# Edge length of one square (center-to-center spacing). MEASURED 2026-10-24: 5.7 cm.
+square_size: 0.057
 
 # a1 is a dark square (true for a standard board, with the robot playing White).
 dark_a1: true
@@ -23,7 +23,7 @@ piece_heights:
   bishop: 0.060  # PLACEHOLDER
   rook: 0.050    # PLACEHOLDER
   queen: 0.075   # PLACEHOLDER
-  king: 0.090    # PLACEHOLDER
+  king: 0.099    # MEASURED 2026-10-24: 9.9 cm (tallest piece; drives z_clear)
 
 # Piece base diameters (for grip width and collision margins). PLACEHOLDER.
 piece_base_diameters:
