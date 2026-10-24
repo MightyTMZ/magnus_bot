@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 
 const GAME_URL_PATTERN = /^https:\/\/www\.chess\.com\/game\/\d+/;
+const BOT_URL_PATTERN = /^https:\/\/www\.chess\.com\/play\/computer\/.+/;
 
 export default function Home() {
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -53,7 +54,8 @@ export default function Home() {
         if (res.ok) {
           const data = await res.json();
           setCurrentUrl(data.url ?? "");
-          if (GAME_URL_PATTERN.test(data.url ?? "")) {
+          const url = data.url ?? "";
+          if (GAME_URL_PATTERN.test(url) || BOT_URL_PATTERN.test(url)) {
             setGameUrl(data.url);
           } else {
             setGameUrl(null);
