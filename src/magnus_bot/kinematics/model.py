@@ -42,17 +42,23 @@ class JointLimit:
 
 @dataclass(frozen=True)
 class SO101Model:
-    """Link lengths (meters) and joint limits for the analytic IK. PLACEHOLDER until URDF-read.
+    """Link lengths (meters) and joint limits for the analytic IK.
 
-    TODO(M1): fill link lengths from the SO-101 URDF and limits from each arm's calibration
-    (range_min/range_max map to these via docs/joint_conventions.md).
+    Link lengths are derived from the SO-ARM100 URDF (hardware/urdf/so101_new_calib.urdf) by
+    composing the joint transforms at the zero pose (see docs/joint_conventions.md). The
+    shoulder_lift / elbow_flex / wrist_flex axes are parallel (world +y at zero pose), so the
+    arm is a base yaw (shoulder_pan) plus a planar 2-link (upper_arm, forearm) with the wrist.
+
+    Joint LIMITS below are still PLACEHOLDER. TODO(M1): derive them per-arm from the calibration
+    (range_min/range_max) via docs/joint_conventions.md. TODO(M1): validate wrist_to_tip's
+    effective top-down vertical offset against placo FK (lerobot.model.kinematics.RobotKinematics).
     """
 
-    # Link lengths along the arm chain (meters). PLACEHOLDER.
-    base_height: float = 0.045        # table to shoulder_pan/shoulder_lift axis
-    upper_arm: float = 0.120          # shoulder_lift -> elbow_flex
-    forearm: float = 0.120            # elbow_flex -> wrist_flex
-    wrist_to_tip: float = 0.060       # wrist_flex -> gripper fingertip
+    # Link lengths along the arm chain (meters), from so101_new_calib.urdf at the zero pose.
+    base_height: float = 0.1166       # table/base to the shoulder_lift axis
+    upper_arm: float = 0.1160         # shoulder_lift -> elbow_flex
+    forearm: float = 0.1350           # elbow_flex -> wrist_flex
+    wrist_to_tip: float = 0.1605      # wrist_flex -> gripper_frame_link (grasp point)
 
     limits: dict[str, JointLimit] = None  # type: ignore[assignment]
 

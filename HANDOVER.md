@@ -6,6 +6,10 @@ Keep it under ~200 lines by summarizing old entries. Never delete decisions — 
 ## Status
 Milestone **M0 (scaffold + tests green)**: COMPLETE. 47 tests pass, ruff clean. No hardware has
 been driven by magnus_bot code yet.
+**M1 Phase 0 started (2026-10-24):** URDF fetched to `hardware/urdf/so101_new_calib.urdf`; real
+link lengths filled into `SO101Model`; nominal joint limits captured in docs/joint_conventions.md
+(apply in Phase 1). Still needed before live M1: 0a (lerobot env — deferred), 0c (measure rig +
+`measured: true`), 0d (read-only arm check, needs 0a).
 
 ## Last session (2026-10-23)
 - Scaffolded the repo: geometry, config, kinematics (IK stub), motion, hardware (`SimArm` full,

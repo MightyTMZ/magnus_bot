@@ -41,6 +41,38 @@ the Feetech `range_min/range_max` (0..4095 counts) and `homing_offset`. The self
 `limits_deg()` converts counts to degrees as `(count − mid)·360/4095` with `mid =
 (range_min+range_max)/2`; mirror that when deriving limits.
 
+## Link lengths and nominal limits (from the URDF)
+
+Extracted from `hardware/urdf/so101_new_calib.urdf` by composing the joint transforms at the zero
+pose. Link lengths are already filled into `kinematics/model.py: SO101Model`:
+
+| field | value (m) | between |
+|-------|-----------|---------|
+| base_height | 0.1166 | base/table → shoulder_lift axis |
+| upper_arm | 0.1160 | shoulder_lift → elbow_flex |
+| forearm | 0.1350 | elbow_flex → wrist_flex |
+| wrist_to_tip | 0.1605 | wrist_flex → gripper_frame_link (grasp point) |
+
+Axis directions at the zero pose confirm the model: shoulder_pan ‖ world z (yaw);
+shoulder_lift / elbow_flex / wrist_flex ‖ world y (parallel pitch ⇒ planar 2-link);
+wrist_roll ‖ world x (tool roll).
+
+Nominal joint limits straight from the URDF (radians, URDF-zero convention). In Phase 1, set
+these as `SO101Model.limits` (replacing the placeholder ±π/2), then tighten per-arm from the
+calibration JSON if a servo's usable range is smaller:
+
+| joint | lower (rad) | upper (rad) | degrees |
+|-------|-------------|-------------|---------|
+| shoulder_pan | -1.9199 | +1.9199 | ±110.0 |
+| shoulder_lift | -1.7453 | +1.7453 | ±100.0 |
+| elbow_flex | -1.6900 | +1.6900 | ±96.8 |
+| wrist_flex | -1.6581 | +1.6581 | ±95.0 |
+| wrist_roll | -2.7439 | +2.8412 | -157.2..+162.8 |
+| gripper | — | — | percent 0..100 at the edge (URDF models it as -0.1745..+1.7453 rad) |
+
+Note: updating `SO101Model.limits` will change `SimArm` clamping, so adjust the clamp expectation
+in `tests/test_hardware_and_motion.py` (currently keyed to the ±π/2 placeholder) at the same time.
+
 ## Validation (M1)
 
 1. FK of the recorded calibration/rest pose should match the physically observed fingertip.
