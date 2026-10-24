@@ -1,69 +1,212 @@
-import Image from "next/image";
+"use client";
+
+import { useEffect, useState, useCallback, useRef } from "react";
+
+const GAME_URL_PATTERN = /^https:\/\/www\.chess\.com\/game\/\d+/;
 
 export default function Home() {
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [viewerUrl, setViewerUrl] = useState<string | null>(null);
+  const [currentUrl, setCurrentUrl] = useState<string>("");
+  const [gameUrl, setGameUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [showBoardView, setShowBoardView] = useState(false);
+  const [showAbandonConfirm, setShowAbandonConfirm] = useState(false);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Create Steel session on mount
+  useEffect(() => {
+    async function init() {
+      try {
+        const res = await fetch("/api/steel", { method: "POST" });
+        if (!res.ok) throw new Error("Failed to create session");
+        const data = await res.json();
+        setSessionId(data.sessionId);
+        setViewerUrl(data.sessionViewerUrl);
+
+        // Navigate to chess.com
+        await fetch("/api/steel/navigate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sessionId: data.sessionId,
+            url: "https://www.chess.com",
+          }),
+        });
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Unknown error");
+      } finally {
+        setLoading(false);
+      }
+    }
+    init();
+  }, []);
+
+  // Poll for URL changes via CDP
+  useEffect(() => {
+    if (!sessionId) return;
+
+    pollRef.current = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/steel/url?sessionId=${sessionId}`);
+        if (res.ok) {
+          const data = await res.json();
+          setCurrentUrl(data.url ?? "");
+          if (GAME_URL_PATTERN.test(data.url ?? "")) {
+            setGameUrl(data.url);
+          } else {
+            setGameUrl(null);
+          }
+        }
+      } catch {
+        // Silently ignore polling errors
+      }
+    }, 3000);
+
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, [sessionId]);
+
+  // Cleanup session on unmount
+  useEffect(() => {
+    return () => {
+      if (sessionId) {
+        fetch("/api/steel", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionId }),
+        });
+      }
+    };
+  }, [sessionId]);
+
+  const isInGame = gameUrl !== null;
+
+  const handleAbandon = useCallback(() => {
+    setShowAbandonConfirm(true);
+  }, []);
+
+  const confirmAbandon = useCallback(() => {
+    setShowAbandonConfirm(false);
+    setShowBoardView(false);
+    if (gameUrl) {
+      window.open(gameUrl, "_blank");
+    }
+  }, [gameUrl]);
+
+  const handleGoToGame = useCallback(() => {
+    if (gameUrl) {
+      window.open(gameUrl, "_blank");
+    }
+  }, [gameUrl]);
+
+  if (error) {
+    return (
+      <div className="flex flex-1 items-center justify-center">
+        <p className="text-red-500">Error: {error}</p>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+    <div className="flex flex-1 h-screen overflow-hidden">
+      {/* Main browser frame */}
+      <div className="flex-1 flex flex-col relative">
+        {/* Top bar */}
+        <div className="flex items-center justify-between px-4 py-2 border-b border-zinc-200 dark:border-zinc-800">
+          <span className="text-sm text-zinc-500 dark:text-zinc-400 truncate max-w-[60%]">
+            {currentUrl || "Loading..."}
+          </span>
+          <button
+            onClick={() => setShowBoardView(true)}
+            className="px-3 py-1.5 text-sm rounded-md border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
           >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
+            Board view
+          </button>
+        </div>
+
+        {/* Browser iframe */}
+        <div className="flex-1 relative">
+          {loading ? (
+            <div className="flex items-center justify-center h-full">
+              <p className="text-zinc-500 dark:text-zinc-400">
+                Starting browser session...
+              </p>
+            </div>
+          ) : viewerUrl ? (
+            <iframe
+              src={viewerUrl}
+              className="w-full h-full border-0"
+              allow="clipboard-read; clipboard-write"
             />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+          ) : null}
         </div>
-      </main>
+      </div>
+
+      {/* Right sidebar */}
+      <div className="w-56 flex flex-col gap-3 p-4 border-l border-zinc-200 dark:border-zinc-800">
+        <button
+          onClick={handleAbandon}
+          disabled={!isInGame}
+          className="px-4 py-2.5 rounded-md text-sm font-medium text-white bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+        >
+          Abandon over the board
+        </button>
+        <button
+          onClick={handleGoToGame}
+          disabled={!isInGame}
+          className="px-4 py-2.5 rounded-md text-sm font-medium text-white bg-green-600 hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+        >
+          Go to the live game
+        </button>
+      </div>
+
+      {/* Board view modal */}
+      {showBoardView && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white dark:bg-zinc-900 rounded-lg shadow-xl w-[600px] h-[500px] flex flex-col">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-200 dark:border-zinc-800">
+              <span className="text-sm font-medium">Board View</span>
+              <button
+                onClick={() => setShowBoardView(false)}
+                className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors"
+              >
+                &#x2715;
+              </button>
+            </div>
+            <div className="flex-1 flex items-center justify-center text-zinc-400 dark:text-zinc-500">
+              Camera feed coming soon
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Abandon confirmation modal */}
+      {showAbandonConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white dark:bg-zinc-900 rounded-lg shadow-xl p-6 max-w-sm">
+            <p className="text-sm mb-4">
+              Are you sure you want to abandon the over-the-board game?
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setShowAbandonConfirm(false)}
+                className="px-4 py-2 text-sm rounded-md border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmAbandon}
+                className="px-4 py-2 text-sm rounded-md text-white bg-red-600 hover:bg-red-700 transition-colors"
+              >
+                Yes, abandon
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
