@@ -1,0 +1,30 @@
+# Arm placement, motion limits, and per-arm hardware wiring.
+# Distances in meters, gripper in percent (0..100). PLACEHOLDER values until measured.
+#
+# Ports live here, never hardcoded. On Windows these are COM ports (one per arm).
+# Calibration ids map to LeRobot calibration files:
+#   ~/.cache/huggingface/lerobot/calibration/robots/so_follower/<calibration_id>.json
+
+# d: gap from each arm's base yaw axis to the near board edge. PLACEHOLDER.
+edge_gap: 0.080
+
+# Default trajectory speed scale (0..1). Conservative by default.
+speed_scale: 0.3
+
+# Traverse height for the hover/traverse phases. MUST exceed the tallest piece + margin.
+z_clear: 0.120   # PLACEHOLDER
+
+# Gripper height when grasping a piece standing on the board. PLACEHOLDER.
+z_grasp: 0.020   # PLACEHOLDER
+
+# Gripper open/closed positions (percent). PLACEHOLDER.
+gripper_open: 90.0     # PLACEHOLDER
+gripper_closed: 25.0   # PLACEHOLDER
+
+arms:
+  follower_1:
+    port: COM3            # beyond the h-file edge, facing -x (toward the a-file)
+    calibration_id: follower_1
+  follower_2:
+    port: COM4            # beyond the a-file edge, facing +x (toward the h-file)
+    calibration_id: follower_2
