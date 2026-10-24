@@ -26,6 +26,12 @@ Live still refuses until 1b (URDF <-> servo, needs the rig).
 `grasp_height` (fingertip target = neck − 23 mm gripper offset, floored). Top-down reach is now
 **f1=22 (files f-h) / f2=24 (files a-d), union 46**; with ≤50° tilt the FULL board (64) is
 reachable. King/queen/rook grasp cleanly; pawn/bishop/knight neck is low → near-tip grasp (to test).
+**Servo map / step 1b DONE (2026-10-24):** `joint_zero_check.py` run on both arms →
+`hardware/servo_maps/{follower_1,follower_2}.json`. follower_1 validated (tip-on-table check
+−0.2 cm). follower_2 vertical joints good, BUT `wrist_roll` offset ≈ −179° (NOT a posing error —
+re-posing didn't change it; its wrist_roll servo is calibrated ~180° rotated vs follower_1).
+Harmless for round-piece grasps at roll=0; clean up later with `lerobot-calibrate` on follower_2.
+First live move will use **follower_1** (clean map, reaches files f–h).
 
 ## Last session (2026-10-24, Alex + Claude) — real motion + tilted-tool IK + collision
 - **First real motion:** both arms via `scripts/hardware_selftest.py` — read-only `baseline` OK,

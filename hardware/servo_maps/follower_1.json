@@ -1,0 +1,30 @@
+{
+  "arm_id": "follower_1",
+  "joints": {
+    "shoulder_pan": {
+      "sign": 1,
+      "offset_rad": -0.06521010392066726,
+      "offset_deg": -3.74
+    },
+    "shoulder_lift": {
+      "sign": 1,
+      "offset_rad": -0.21818533594162082,
+      "offset_deg": -12.5
+    },
+    "elbow_flex": {
+      "sign": 1,
+      "offset_rad": 0.2757236629304448,
+      "offset_deg": 15.8
+    },
+    "wrist_flex": {
+      "sign": 1,
+      "offset_rad": 0.20637079946658227,
+      "offset_deg": 11.82
+    },
+    "wrist_roll": {
+      "sign": 1,
+      "offset_rad": -0.00997331001139617,
+      "offset_deg": -0.57
+    }
+  }
+}
