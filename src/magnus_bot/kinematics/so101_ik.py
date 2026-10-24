@@ -8,15 +8,14 @@ is only ever a cross-check (see tests/test_ik.py), never the control path.
 CONVENTION: this module works in an internal *model* convention — angles measured from +z (up),
 in radians, in the arm frame A_i (origin on the base yaw axis, +x forward, +y left, +z up). The
 shoulder_lift / elbow_flex / wrist_flex axes are parallel (verified from the URDF), so the arm is
-a yaw plus a planar 3-link (upper_arm, forearm, wrist_to_tip). Mapping these model angles to the
-servo-calibration angles LeRobot commands is the URDF-zero <-> servo step in
-docs/joint_conventions.md (Phase 1 / M1); do NOT feed these directly to hardware yet, and joint
-limits (servo convention) are applied after that mapping, not here.
+a yaw plus a planar 3-link (upper_arm, forearm, wrist_to_tip). :mod:`kinematics.conventions`
+maps these model angles to URDF-zero angles, where joint limits apply; the URDF-zero <-> servo
+step (docs/joint_conventions.md) is still unverified on hardware, so do NOT feed either
+directly to an arm yet.
 
-The planar model currently idealizes the shoulder as sitting on the yaw axis (it ignores the
-~1-3 cm shoulder mount offsets in the URDF). forward() and inverse() are exact inverses of each
-other (round-trip is tight), but absolute accuracy against the real arm must be validated against
-placo FK before live use (tests/test_ik.py::test_cross_check_placo, skipped until the env exists).
+The planar model includes the shoulder_lift axis's forward offset from the yaw axis. Mapped to
+URDF angles (kinematics/conventions.py) it matches the URDF chain to <0.1 mm at wrist_roll = 0
+(tests/test_conventions.py); non-zero roll moves the tip up to 7.9 mm (it sits off the roll axis).
 """
 
 from __future__ import annotations
@@ -48,7 +47,12 @@ class SO101Kinematics:
         a1 = a0 + joints["elbow_flex"]
         a2 = a1 + joints["wrist_flex"]
         m = self.model
-        r = m.upper_arm * math.sin(a0) + m.forearm * math.sin(a1) + m.wrist_to_tip * math.sin(a2)
+        r = (
+            m.shoulder_forward
+            + m.upper_arm * math.sin(a0)
+            + m.forearm * math.sin(a1)
+            + m.wrist_to_tip * math.sin(a2)
+        )
         z = (
             m.base_height
             + m.upper_arm * math.cos(a0)
@@ -72,7 +76,7 @@ class SO101Kinematics:
         r = math.hypot(x, y)
 
         # Tool points straight down (a2 = pi), so the wrist sits wrist_to_tip ABOVE the tip.
-        dr = r
+        dr = r - m.shoulder_forward
         dz = (z + m.wrist_to_tip) - m.base_height
         reach = math.hypot(dr, dz)
         if reach > m.upper_arm + m.forearm or reach < abs(m.upper_arm - m.forearm):

@@ -5,7 +5,7 @@ Keep it under ~200 lines by summarizing old entries. Never delete decisions — 
 
 ## Status
 Milestone **M0 (scaffold + tests green)**: COMPLETE. No hardware has been driven by magnus_bot
-code yet. **75 tests pass, 1 skip** (placo cross-check, needs the `ik` env); ruff clean on
+code yet. **81 tests pass, 1 skip** (placo cross-check, needs the `ik` env); ruff clean on
 `src/ tests/ scripts/` (`RF-DETR/` has 7 lint findings).
 **M1 Phase 0 (2026-10-24):** 0a env built (lerobot + serial-motors + magnus_bot[hardware] in
 `C:\projects\lerobot\.venv`). 0b done (URDF link lengths in `SO101Model`; nominal limits in
@@ -15,9 +15,23 @@ king 0.099, z_clear 0.140. 0d done. Found + fixed a scrambled servo-ID assignmen
 per-piece `gripper_closed` (see Open questions) + the non-king piece dims.
 **M1 Phase 2 (2026-10-24):** analytic FK/IK done (top-down grasp, model convention).
 **M1 step 2 (2026-10-24):** trajectory planner + executor joint path done, **sim only**.
-Live still refuses (no IK -> servo mapping yet).
+**M1 step 1a (2026-10-24):** IK model <-> URDF-zero mapping done and URDF limits in place.
+Live still refuses until 1b (URDF <-> servo, needs the rig).
 
-## Last session (2026-10-24, Lucas)
+## Last session (2026-10-24, Lucas, part 2) — step 1a
+- `kinematics/conventions.py`: `model_to_urdf` / `urdf_to_model` (sign + offset per joint;
+  table in docs/joint_conventions.md). The IK keeps its own convention (Alex's design).
+- `SO101Model`: added `shoulder_forward = 0.0304` (shoulder_lift axis is 3.04 cm ahead of the
+  yaw axis; ignoring it was a ~3.1 cm mean tip error) and corrected `wrist_to_tip` to the
+  in-plane 0.1594 (was the 3-D 0.1605). IK uses `shoulder_forward` (2 lines). Limits are now
+  the URDF limits (URDF-zero radians); `SimArm` clamps to them.
+- `tests/test_conventions.py`: numpy FK of the URDF chain (no placo). Model FK == URDF FK to
+  < 0.1 mm at `wrist_roll = 0`; roll != 0 is approximate (tip 7.9 mm off the roll axis).
+- Executor sim now commands URDF-zero angles by default (`to_command` = `model_to_urdf`) and
+  checks the URDF limits. Wide test limits removed. Sim tests use a 6 cm `z_clear` because
+  the rig's 14 cm is infeasible top-down (see REACH).
+
+## Session before (2026-10-24, Lucas, part 1)
 - `motion/trajectory.py`: `plan_joint_trajectory` + `segment_duration`. Segment time =
   max over joints of `1.875 · |Δq| / (v_max · speed_scale)` (1.875 = min-jerk peak/average
   speed), so joints start/stop together and none exceeds its limit. PLACEHOLDER per-joint
@@ -50,18 +64,20 @@ Live still refuses (no IK -> servo mapping yet).
   frontend/backend") — team to decide (Open questions).
 
 ## Next steps (ordered)
-1. **M1 — IK -> servo mapping** (rest of step 1): pin `servo = sign·model + offset` per joint
-   from the NEW follower_1 calibration (docs/joint_conventions.md); set real `SO101Model.limits`
-   (URDF table) and fix the clamp test in `tests/test_hardware_and_motion.py`; pass it to the
-   executor as `to_command`. Note IK angles are a third convention (angle from +z; wrist_flex
-   ~3.1 rad tool-down), distinct from both URDF-zero and servo. Unblocks live + realistic sim.
+1. **M1 1b — URDF zero -> servo (Alex, rig, read-only).** Put the arm in known poses (URDF
+   zero = arm straight out horizontally, gripper in line), read degrees with
+   `gripper_read.py`, record sign + offset per joint vs. the URDF (expected ~identity for
+   `so101_new_calib`, unverified). Use the NEW calibration, not the obsolete repo backup.
+   Tighten `SO101Model.limits` from the calibration range. Then live `to_command` =
+   `urdf_to_servo(model_to_urdf(q))`.
 2. **M1 — validate `LeRobotArm`** on one arm (slow), read-only first, then a single pick/place.
    Needs `--live` + operator approval + `measured: true`.
-3. **M2 — reachability**: implement `kinematics/reach.compute_reachability` and
-   `scripts/reach_report.py` (provisional until step 1's limits exist); wire into assignment.
-   Its output is the evidence for the REACH decision below.
-4. **Decide the REACH fix** (team; see Known issues) — likely tilted-tool IK, which changes the
-   top-down IK design. Then re-plan the handoff pad (no off-board point is reachable by both).
+3. **M2 — reachability** (software): implement `kinematics/reach.compute_reachability` and
+   `scripts/reach_report.py` using IK + `model_to_urdf` + URDF limits at BOTH z_grasp and
+   z_clear; wire into assignment. Evidence for the REACH decision below.
+4. **Decide the REACH fix** (team; see Known issues). Top-down cannot hover high enough
+   anywhere, so this now blocks real games. Then re-plan the handoff pad (no off-board point
+   is reachable by both).
 5. Replace the BIN/STASH "any arm" assumption in `planning/assigner.py` with measured reach.
 6. M4: wrap `RF-DETR/` behind `BoardSource` so the orchestrator owns game state and reads the
    camera only when both arms are at rest.
@@ -91,17 +107,27 @@ Live still refuses (no IK -> servo mapping yet).
   `JointLimitError`, clamping stays a last-resort guard inside the arms).
 - 2026-10-24: Arms return to their rest pose (pose at move start) after each transfer.
 - 2026-10-24: Live requires an explicit `to_command` joint map; no identity default for hardware.
+- 2026-10-24: Three joint conventions (IK model / URDF zero / servo). IK stays in its model
+  convention; `kinematics/conventions.py` maps to URDF zero, where limits are checked. Sim
+  commands URDF-zero angles.
 
 ## Known issues
-- **REACH (2026-10-24, open, blocking).** With the measured rig and the current top-down IK,
-  the two arms together reach only **12/64 squares** at z_clear (h/g and a/b files near ranks
-  3–6); at grasp height alone 36/64. The farthest square on each arm's half (e1/e8)
-  is 0.333 m from the base; tool-down at z_clear leaves ~0.17 m horizontal reach. A rough model
-  allowing up to 45° tool tilt covers ~60/64 at z_clear with d/e reachable by both. No
-  off-board pad point is reachable by both arms. Rough model: ignores shoulder offsets and real
-  limits. Consequence today: sim tests use h4h5 (reachable); `e2e4` raises Unreachable.
-- **Sim limits (2026-10-24).** IK angles are model convention, so the ±π/2 PLACEHOLDER limits
-  reject every move; executor sim tests use wide limits until next step 1 lands.
+- **REACH (2026-10-24, open, blocking).** Updated after step 1a (shoulder offset + URDF
+  limits, top-down IK, elbow up):
+  - At grasp height (2.8 cm): **48/64** squares commandable (a–c / f–h files, fewer near the corners, plus d/e on
+    ranks 4–5); none by both arms.
+  - At z_clear (14 cm): **0/64**. The wrist would need > 95° (URDF `wrist_flex` limit ±1.658)
+    to point the tool down. The highest top-down hover anywhere is **9.6 cm** (b/g files),
+    below the king (9.9 cm) and far below the 13.7 cm needed to carry a pawn over a king.
+  - So a top-down grasp cannot traverse over tall pieces at all. Options: tilted-tool IK
+    (rough model: ~60/64 at 14 cm with ≤45° tilt), routing/lift heights per move, base
+    risers, smaller board. Limits are the URDF nominals; the real servo range (1b) may differ.
+  - No off-board pad point is reachable by both arms. The farthest square on each arm's half
+    (e1/e8) is 0.333 m from the base.
+  - Consequence today: sim tests use h4h5 with a 6 cm z_clear; the rig config raises
+    `JointLimitError` at hover (pinned by `test_rig_z_clear_breaks_the_wrist_limit_top_down`).
+- RESOLVED 2026-10-24 — sim used wide test limits (IK angles vs. servo placeholders); now
+  `model_to_urdf` + URDF limits.
 - RESOLVED 2026-10-24 — IK `elbow="up"` returned the elbow-down branch (see Last session).
 - RESOLVED 2026-10-24 — follower_1 servo IDs were SCRAMBLED: bus IDs by physical joint (base->tip)
   were `[5, 6, 1, 2, 4, 3]` instead of `[1..6]`, so every joint reported the wrong name (e.g.
@@ -126,5 +152,5 @@ Live still refuses (no IK -> servo mapping yet).
 - Lint: `<venv python> -m ruff check src tests scripts`
 - Sim: `magnus-bot info` · `magnus-bot demo-move --uci e2e4`
 - Dry-run a move program: `python scripts/demo_single_move.py --uci e2e4`
-- Sim-execute a move: `Executor(..., simulate=True, limits=<wide>)` (see tests/test_executor.py)
+- Sim-execute a move: `Executor(..., simulate=True)` with a feasible `z_clear` (see tests/test_executor.py `_low_clear`)
 - LIVE self-test (moves an arm; needs approval): see `scripts/hardware_selftest.py` header.

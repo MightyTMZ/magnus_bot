@@ -7,7 +7,8 @@ trajectory -> stream to the arm.
 
 Three modes:
   * dry-run (default): return the program, command nothing.
-  * simulate: run the program on :class:`SimArm` instances (safety rule 4's sim pass).
+  * simulate: run the program on :class:`SimArm` instances (safety rule 4's sim pass), in
+    URDF-zero joint angles (``model_to_urdf``) against the URDF joint limits.
   * live: gated. Refuses unless ``config.measured`` is true AND an IK -> servo joint mapping
     (``to_command``, docs/joint_conventions.md) is supplied.
 
@@ -33,6 +34,7 @@ from magnus_bot.geometry import board as board_geom
 from magnus_bot.geometry.frames import arm_placements
 from magnus_bot.hardware.arm import Arm
 from magnus_bot.hardware.sim_arm import SimArm
+from magnus_bot.kinematics.conventions import model_to_urdf
 from magnus_bot.kinematics.model import JointLimit
 from magnus_bot.kinematics.reach import ReachabilityMap
 from magnus_bot.kinematics.so101_ik import SO101Kinematics, Unreachable
@@ -44,8 +46,9 @@ from magnus_bot.planning.move_decomposer import BIN, PAD, SQUARE, STASH, Locatio
 
 log = logging.getLogger(__name__)
 
-# Maps IK (model-convention) joint angles to the angles the arm is commanded in. Supplied by the
-# URDF-zero <-> servo calibration step (docs/joint_conventions.md); identity in sim until then.
+# Maps IK (model-convention) joint angles to the angles the arm is commanded in. Sim defaults to
+# model_to_urdf; live must be given model -> servo once the URDF <-> servo step is verified
+# on hardware (docs/joint_conventions.md).
 JointMap = Callable[[dict[str, float]], dict[str, float]]
 
 # Max |commanded - read| (rad) per arm joint after a trajectory before it counts as a fault.
@@ -207,7 +210,7 @@ class Executor:
         self.rmap = rmap
         self.live = live
         self.simulate = simulate
-        self.to_command = to_command
+        self.to_command = to_command or model_to_urdf
         self.kinematics = kinematics or SO101Kinematics()
         self.limits = limits or self.kinematics.model.limits
         self.hz = hz

@@ -1,7 +1,5 @@
 """SimArm, safety clamps, and motion primitives."""
 
-import math
-
 import numpy as np
 import pytest
 
@@ -24,9 +22,9 @@ def test_sim_arm_requires_connection():
 def test_sim_arm_clamps_and_logs():
     arm = SimArm("follower_1")
     arm.connect()
-    sent = arm.send_joints({"shoulder_pan": 10.0})  # far beyond the +/- pi/2 limit
-    assert sent["shoulder_pan"] == pytest.approx(math.pi / 2)
-    assert arm.read_joints()["shoulder_pan"] == pytest.approx(math.pi / 2)
+    sent = arm.send_joints({"shoulder_pan": 10.0})  # far beyond the URDF limit (+/- 110 deg)
+    assert sent["shoulder_pan"] == pytest.approx(1.91986)
+    assert arm.read_joints()["shoulder_pan"] == pytest.approx(1.91986)
     assert arm.command_log == [sent]
 
 
