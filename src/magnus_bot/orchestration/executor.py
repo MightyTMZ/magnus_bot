@@ -151,11 +151,13 @@ def plan_joint_program(
     limits: Mapping[str, JointLimit],
     to_command: JointMap | None = None,
     hz: float = 30.0,
+    pitch: float = 0.0,
 ) -> list[ArmTrajectory]:
     """Joint trajectories for a whole program, each starting and ending at that arm's ``rest`` pose.
 
-    Raises :class:`Unreachable` or :class:`JointLimitError` (with arm, transfer and phase) if any
-    waypoint cannot be commanded. Pure: nothing is sent to any arm.
+    ``pitch`` tilts the tool off vertical for every grasp waypoint (0 = top-down). Raises
+    :class:`Unreachable` or :class:`JointLimitError` (with arm, transfer and phase) if any waypoint
+    cannot be commanded. Pure: nothing is sent to any arm.
     """
     placements = arm_placements(config.board.square_size, config.arms.edge_gap)
     trajectories = []
@@ -172,7 +174,7 @@ def plan_joint_program(
             where = f"{arm_steps.arm_id} {arm_steps.transfer.reason} {step.phase.value}"
             x, y = placement.board_to_arm(step.xyz[:2])
             try:
-                model = kinematics.inverse(np.array([x, y, step.xyz[2]]))
+                model = kinematics.inverse(np.array([x, y, step.xyz[2]]), pitch=pitch)
             except Unreachable as exc:
                 raise Unreachable(f"{where}: {exc}") from exc
             command = to_command(model) if to_command else dict(model)
@@ -202,9 +204,11 @@ class Executor:
         limits: Mapping[str, JointLimit] | None = None,
         kinematics: SO101Kinematics | None = None,
         hz: float = 30.0,
+        pitch: float = 0.0,
     ) -> None:
         if live and simulate:
             raise ValueError("choose live or simulate, not both")
+        self.pitch = pitch
         self.config = config
         self.arms = arms
         self.rmap = rmap
@@ -245,7 +249,8 @@ class Executor:
                 raise RuntimeError(f"{arm_id}: not connected")
         rest = {arm_id: self.arms[arm_id].read_joints() for arm_id in used}
         return plan_joint_program(
-            program, self.config, rest, self.kinematics, self.limits, self.to_command, self.hz
+            program, self.config, rest, self.kinematics, self.limits, self.to_command,
+            self.hz, self.pitch,
         )
 
     def run(self, trajectories: list[ArmTrajectory]) -> None:

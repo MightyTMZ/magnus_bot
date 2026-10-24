@@ -1,5 +1,7 @@
 """Config loading (packaged configs) and transform helpers."""
 
+import dataclasses
+
 import numpy as np
 import pytest
 
@@ -18,7 +20,8 @@ def test_packaged_config_loads_unmeasured():
 
 
 def test_require_measured_refuses_on_placeholders():
-    config = load_config()
+    # Build an explicitly-unmeasured config (the shipped one may be measured now the rig is real).
+    config = dataclasses.replace(load_config(), measured=False)
     with pytest.raises(RuntimeError):
         config.require_measured()
 

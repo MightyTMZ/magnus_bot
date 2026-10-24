@@ -163,7 +163,7 @@ def test_live_refuses_without_joint_mapping():
 
 
 def test_live_refuses_on_unmeasured_config():
-    config = load_config()
+    config = dataclasses.replace(load_config(), measured=False)  # shipped config may be measured now
     with pytest.raises(Exception, match="(?i)measured"):
         Executor(config, {}, _full_reach_map(config), live=True, to_command=dict)
 
