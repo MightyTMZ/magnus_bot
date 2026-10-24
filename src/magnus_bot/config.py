@@ -28,7 +28,9 @@ class BoardConfig:
     dark_a1: bool
     human_color: str  # "black" (default) or "white"; robots play the other color and move first.
     piece_heights: dict[str, float]
-    piece_base_diameters: dict[str, float]
+    piece_base_diameters: dict[str, float]  # base = widest point = collision-cylinder diameter
+    piece_stem_diameters: dict[str, float] = field(default_factory=dict)  # grippable neck width
+    grasp_height: dict[str, float] = field(default_factory=dict)  # per-piece fingertip target (m)
 
     @property
     def robot_color(self) -> str:
@@ -44,7 +46,7 @@ class ArmConfig:
 
 @dataclass(frozen=True)
 class ArmsConfig:
-    edge_gap: float  # d: base-to-board-edge gap
+    edge_gap: dict[str, float]  # d per arm id: base yaw axis -> near board edge
     speed_scale: float  # default trajectory speed scale (0..1)
     z_clear: float  # traverse height, > tallest piece + margin
     z_grasp: float  # gripper height when grasping a piece on the board
@@ -112,10 +114,12 @@ def load_config(config_dir: str | Path | None = None) -> Config:
         human_color=human_color,
         piece_heights=_float_map(board_raw, "piece_heights"),
         piece_base_diameters=_float_map(board_raw, "piece_base_diameters"),
+        piece_stem_diameters=_float_map(board_raw, "piece_stem_diameters"),
+        grasp_height=_float_map(board_raw, "grasp_height"),
     )
 
     arms = ArmsConfig(
-        edge_gap=_float(arms_raw, "edge_gap"),
+        edge_gap=_edge_gap(arms_raw, arms_raw["arms"]),
         speed_scale=_float(arms_raw, "speed_scale"),
         z_clear=_float(arms_raw, "z_clear"),
         z_grasp=_float(arms_raw, "z_grasp"),
@@ -166,6 +170,15 @@ def _float(d: dict[str, Any], key: str) -> float:
 def _float_map(d: dict[str, Any], key: str) -> dict[str, float]:
     raw = d.get(key, {}) or {}
     return {str(k): float(v) for k, v in raw.items()}
+
+
+def _edge_gap(arms_raw: dict[str, Any], arm_specs: dict[str, Any]) -> dict[str, float]:
+    """Parse edge_gap as a per-arm map, or a scalar applied to every arm."""
+    raw = arms_raw["edge_gap"]
+    if isinstance(raw, dict):
+        return {str(k): float(v) for k, v in raw.items()}
+    gap = float(raw)
+    return {arm_id: gap for arm_id in arm_specs}
 
 
 def _pose(d: dict[str, Any]) -> Pose:

@@ -5,9 +5,12 @@
 # Calibration ids map to LeRobot calibration files:
 #   ~/.cache/huggingface/lerobot/calibration/robots/so_follower/<calibration_id>.json
 
-# d: gap from each arm's base yaw axis to the near board edge. MEASURED 2026-10-24: 6.7 cm
-# (center of the base axis to the nearest square's edge == the board edge).
-edge_gap: 0.067
+# d: gap from each arm's base yaw axis (center of the shoulder_pan servo) to the near board edge.
+# PER-ARM (MEASURED 2026-10-24): the two arms are NOT equidistant, so follower_1 reaches ~1.8 cm
+# less of the board than follower_2. A single scalar here is still accepted (applied to both arms).
+edge_gap:
+  follower_1: 0.085
+  follower_2: 0.067
 
 # Default trajectory speed scale (0..1). Conservative by default.
 speed_scale: 0.3

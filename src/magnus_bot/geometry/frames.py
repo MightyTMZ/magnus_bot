@@ -17,6 +17,7 @@ Arm frame A_i: origin on the base yaw axis, +x forward (``facing``), +y left
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 import numpy as np
@@ -58,22 +59,28 @@ class ArmPlacement:
         return float(np.linalg.norm(np.asarray(xy, dtype=float) - self.base_xy))
 
 
-def arm_placements(square_size: float, gap: float) -> dict[str, ArmPlacement]:
-    """The two follower placements for a given square size ``s`` and edge gap ``d``.
+def arm_placements(square_size: float, gap: float | Mapping[str, float]) -> dict[str, ArmPlacement]:
+    """The two follower placements for a given square size ``s`` and edge gap(s) ``d``.
 
-    See the module docstring for the geometry these encode (and the unit tests that pin it).
+    ``gap`` is either a single distance applied to both arms, or a per-arm mapping
+    ``{arm_id: gap}`` (the arms are not equidistant from the board on the measured rig). See the
+    module docstring for the geometry these encode (and the unit tests that pin it).
     """
-    s, d = float(square_size), float(gap)
+    s = float(square_size)
+    if isinstance(gap, Mapping):
+        d1, d2 = float(gap["follower_1"]), float(gap["follower_2"])
+    else:
+        d1 = d2 = float(gap)
     mid = (BOARD_SIZE / 2) * s  # y of the board's mid-line (rank 4/5 boundary): 4s
     return {
         "follower_1": ArmPlacement(
             arm_id="follower_1",
-            base_xy=np.array([BOARD_SIZE * s + d, mid], dtype=float),
+            base_xy=np.array([BOARD_SIZE * s + d1, mid], dtype=float),
             facing=unit(np.array([-1.0, 0.0])),
         ),
         "follower_2": ArmPlacement(
             arm_id="follower_2",
-            base_xy=np.array([-d, mid], dtype=float),
+            base_xy=np.array([-d2, mid], dtype=float),
             facing=unit(np.array([1.0, 0.0])),
         ),
     }

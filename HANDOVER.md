@@ -21,6 +21,11 @@ Live still refuses until 1b (URDF <-> servo, needs the rig).
 **M1 1b tooling (2026-10-24):** `scripts/joint_zero_check.py` + `ServoMap` ready; needs the rig.
 **First real motion + REACH fix (2026-10-24):** both arms driven read-only + gentle self-test
 (PASS 12/12). Implemented the tilted-tool IK (the REACH fix) and the approach-collision guard.
+**Measured geometry integrated (2026-10-24):** real square (56 mm), PER-ARM gaps (follower_1
+85 mm, follower_2 67 mm — asymmetric!), piece heights/base/stem diameters, and per-piece
+`grasp_height` (fingertip target = neck − 23 mm gripper offset, floored). Top-down reach is now
+**f1=22 (files f-h) / f2=24 (files a-d), union 46**; with ≤50° tilt the FULL board (64) is
+reachable. King/queen/rook grasp cleanly; pawn/bishop/knight neck is low → near-tip grasp (to test).
 
 ## Last session (2026-10-24, Alex + Claude) — real motion + tilted-tool IK + collision
 - **First real motion:** both arms via `scripts/hardware_selftest.py` — read-only `baseline` OK,

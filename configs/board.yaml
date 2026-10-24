@@ -2,11 +2,11 @@
 #
 # measured: GATE for live operation. While false, every value below is a PLACEHOLDER,
 # sim mode warns, and live mode refuses to run. Set to true ONLY after measuring the rig
-# and filling in the real numbers.
+# and filling in the real numbers. Still false: the gripper open/closed %s are not measured yet.
 measured: false
 
-# Edge length of one square (center-to-center spacing). MEASURED 2026-10-24: 5.7 cm.
-square_size: 0.057
+# Edge length of one square (center-to-center spacing). MEASURED 2026-10-24: 56 mm.
+square_size: 0.056
 
 # a1 is a dark square (true for a standard board, with the robot playing White).
 dark_a1: true
@@ -15,30 +15,51 @@ dark_a1: true
 # and move first. Flip to "white" to swap sides (code must support this).
 human_color: black
 
-# Piece heights (table to top). PLACEHOLDER — z_clear in arms.yaml must exceed the tallest
-# of these plus a margin.
+# Piece heights (table to top). MEASURED 2026-10-24. z_clear in arms.yaml must exceed the
+# tallest of these (king, 9.6 cm) plus the hanging-piece margin.
 piece_heights:
-  pawn: 0.040    # PLACEHOLDER
-  knight: 0.055  # PLACEHOLDER
-  bishop: 0.060  # PLACEHOLDER
-  rook: 0.050    # PLACEHOLDER
-  queen: 0.075   # PLACEHOLDER
-  king: 0.099    # MEASURED 2026-10-24: 9.9 cm (tallest piece; drives z_clear)
+  pawn: 0.044
+  knight: 0.057
+  bishop: 0.064
+  rook: 0.045
+  queen: 0.075
+  king: 0.096
 
-# Piece base diameters (for grip width and collision margins). PLACEHOLDER.
+# Piece base diameters (for grip width and collision margins). MEASURED 2026-10-24. The base is
+# the WIDEST part of every piece, so these are each piece's max diameter (the collision cylinder).
 piece_base_diameters:
-  pawn: 0.024    # PLACEHOLDER
-  knight: 0.028  # PLACEHOLDER
-  bishop: 0.028  # PLACEHOLDER
-  rook: 0.028    # PLACEHOLDER
-  queen: 0.032   # PLACEHOLDER
-  king: 0.034    # PLACEHOLDER
+  pawn: 0.027
+  knight: 0.032
+  bishop: 0.030
+  rook: 0.031
+  queen: 0.036
+  king: 0.037
+
+# Grippable "stem"/neck diameter (narrowest clamp point). MEASURED 2026-10-24. The gripper must
+# close to about this width to hold the piece; maps to gripper_closed_pct once that's calibrated.
+piece_stem_diameters:
+  pawn: 0.008
+  knight: 0.020
+  bishop: 0.012
+  rook: 0.016
+  queen: 0.010
+  king: 0.015
+
+# Fingertip (IK target) height for a top-down grasp, per piece. Derived 2026-10-24 as
+# (stem/neck height) - (gripper tip->pad-center, ~23 mm), floored at ~3 mm board clearance so the
+# jaw tips do not scrape. King/queen/rook land the pad center on the neck; pawn/bishop/knight have
+# low necks so they floor to a near-tip grasp (tips ~3 mm off the board) — the marginal grasps.
+grasp_height:
+  pawn: 0.003
+  knight: 0.003
+  bishop: 0.003
+  rook: 0.005
+  queen: 0.022
+  king: 0.025
 
 # Gripper closing position (percent) that firmly holds each piece type. The hold value DIFFERS
-# per piece (base diameter), so it's recorded per type here. Measure each with
-# scripts/gripper_read.py (close on that piece). NOTE: not yet read by config.py — the single
-# arms.yaml:gripper_closed is used until per-piece grasp lands (M2/M3); this is the canonical
-# place to record the measured values now. Fill the nulls.
+# per piece (stem diameter), so it's recorded per type here. Measure each with
+# scripts/gripper_read.py (close on that piece's stem). Fill the nulls to help flip measured:true.
 gripper_closed_pct:
   pawn: null     # TODO measure
   knight: null   # TODO measure

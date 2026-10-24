@@ -39,18 +39,22 @@ def test_each_arm_reaches_its_own_side_only(rig):
     assert not rmap.can_reach("follower_2", 7, 3)
 
 
-def test_arms_are_mirror_images(rig):
-    # The arms face each other across the board, so their maps mirror across the d/e line.
+def test_follower_1_reaches_a_subset_being_farther(rig):
+    # The arms are NOT equidistant on the measured rig (follower_1 is ~1.8 cm farther), so their
+    # maps no longer mirror: follower_1 reaches a STRICT SUBSET of follower_2's mirror image.
     rmap = _rmap(rig)
-    mirrored = {(7 - f, r) for f, r in rmap.reachable["follower_1"]}
-    assert mirrored == rmap.reachable["follower_2"]
+    mirrored_f2 = {(7 - f, r) for f, r in rmap.reachable["follower_2"]}
+    assert rmap.reachable["follower_1"] <= mirrored_f2
+    assert rmap.reachable["follower_1"] != mirrored_f2
 
 
 def test_rig_numbers_top_down(rig):
     # Pins HANDOVER Known issues: REACH (top-down, URDF limits). Update when the geometry changes.
     config = rig[0]
     grasp = _rmap(rig)
-    assert len(set().union(*grasp.reachable.values())) == 48
+    assert len(set().union(*grasp.reachable.values())) == 46  # measured asymmetric rig
+    assert len(grasp.reachable["follower_1"]) == 22  # farther arm (85 mm): files f-h
+    assert len(grasp.reachable["follower_2"]) == 24  # nearer arm (67 mm): files a-d
     assert not grasp.reachable["follower_1"] & grasp.reachable["follower_2"]
     hover = _rmap(rig, z_clear=config.arms.z_clear)
     assert all(not squares for squares in hover.reachable.values())
@@ -99,7 +103,7 @@ def test_pitch_opens_squares_top_down_cannot_reach(rig):
     config, placements, kin = rig
     s, zg = config.board.square_size, config.arms.z_grasp
     top_union = set().union(*compute_reachability(placements, kin, zg, s).reachable.values())
-    assert len(top_union) == 48  # matches test_rig_numbers_top_down
+    assert len(top_union) == 46  # matches test_rig_numbers_top_down (measured asymmetric rig)
 
     tilt = compute_reachability(placements, kin, zg, s, max_pitch=np.radians(50))
     tilt_union = set().union(*tilt.reachable.values())
