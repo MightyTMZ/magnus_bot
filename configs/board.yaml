@@ -64,6 +64,6 @@ gripper_closed_pct:
   pawn: null     # TODO measure
   knight: null   # TODO measure
   bishop: null   # TODO measure
-  rook: null     # TODO measure
+  rook: 4.15     # MEASURED 2026-10-24 (follower_1, firm hold on the rook stem)
   queen: null    # TODO measure
   king: null     # TODO measure

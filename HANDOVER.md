@@ -32,6 +32,11 @@ reachable. King/queen/rook grasp cleanly; pawn/bishop/knight neck is low → nea
 re-posing didn't change it; its wrist_roll servo is calibrated ~180° rotated vs follower_1).
 Harmless for round-piece grasps at roll=0; clean up later with `lerobot-calibrate` on follower_2.
 First live move will use **follower_1** (clean map, reaches files f–h).
+**First move — SIM PASS (2026-10-24):** gripper measured (follower_1: open 77, rook closed 4.15).
+`scripts/first_move.py` runs follower_1 g3→g4 (rook, per-piece grasp height, low 6 cm hover since
+top-down can't hover at 14 cm): `--sim` planned+executed clean (8 phases, back to rest). `--live`
+is written + gated (needs `measured: true` + follower_1 servo map + operator). REMAINING for live:
+flip `measured: true`, start follower_1 from a safe near-board pose, run `--live` with approval.
 
 ## Last session (2026-10-24, Alex + Claude) — real motion + tilted-tool IK + collision
 - **First real motion:** both arms via `scripts/hardware_selftest.py` — read-only `baseline` OK,
