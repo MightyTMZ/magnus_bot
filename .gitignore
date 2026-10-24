@@ -1,11 +1,9 @@
-<<<<<<< HEAD
 .env
 __pycache__/
 *.pyc
 stockfish.exe
-=======
+
 # Python
-__pycache__/
 *.py[cod]
 *.egg-info/
 .eggs/
@@ -45,4 +43,3 @@ scripts/report.json
 # LeRobot calibration lives in the user cache, not the repo; keep stray copies out
 # (reference copies under hardware/ are committed deliberately).
 *.calibration.json
->>>>>>> origin/main
