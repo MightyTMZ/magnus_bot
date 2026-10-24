@@ -70,6 +70,50 @@ def test_roll_passthrough(kin):
     assert kin.inverse(np.array([0.15, 0.0, Z]), roll=0.5)["wrist_roll"] == 0.5
 
 
+@pytest.mark.parametrize("pitch_deg", [10, 30, 45])
+@pytest.mark.parametrize("elbow", ["up", "down"])
+def test_pitched_round_trip_is_tight(kin, pitch_deg, elbow):
+    """forward(inverse(target, pitch=p)) == target for a tilted grasp, on the reachable grid."""
+    pitch = math.radians(pitch_deg)
+    checked = 0
+    for x in np.linspace(0.08, 0.30, 16):
+        for y in np.linspace(-0.12, 0.12, 13):
+            target = np.array([x, y, Z])
+            try:
+                joints = kin.inverse(target, elbow=elbow, pitch=pitch)
+            except Unreachable:
+                continue
+            assert np.linalg.norm(kin.forward(joints) - target) < 1e-9
+            checked += 1
+    assert checked > 50
+
+
+def test_tool_angle_follows_pitch(kin):
+    pitch = math.radians(35)
+    j = kin.inverse(np.array([0.28, 0.0, Z]), pitch=pitch)
+    a2 = j["shoulder_lift"] + j["elbow_flex"] + j["wrist_flex"]
+    assert math.isclose(a2, math.pi - pitch, abs_tol=1e-9)  # tool tilted by `pitch` off vertical
+
+
+def test_pitch_extends_reach(kin):
+    """A target outside the top-down workspace becomes reachable once the tool tilts."""
+    far = np.array([0.30, 0.0, Z])
+    with pytest.raises(Unreachable):
+        kin.inverse(far, pitch=0.0)  # top-down cannot reach it
+    joints = kin.inverse(far, pitch=math.radians(45))  # a tilt can
+    assert np.linalg.norm(kin.forward(joints) - far) < 1e-9
+
+
+def test_link_points_chain_is_consistent(kin):
+    """link_points is a connected chain ending at forward(); segment lengths match the model."""
+    j = kin.inverse(np.array([0.15, 0.03, Z]), pitch=math.radians(20))
+    pts = kin.link_points(j)
+    assert np.allclose(pts[-1], kin.forward(j))
+    m = kin.model
+    assert math.isclose(np.linalg.norm(pts[2] - pts[1]), m.forearm, abs_tol=1e-9)
+    assert math.isclose(np.linalg.norm(pts[3] - pts[2]), m.wrist_to_tip, abs_tol=1e-9)
+
+
 def test_cross_check_placo_matches_urdf_geometry():
     """When placo + the URDF are present, placo's zero-pose FK tip must match the geometry we
     extracted into SO101Model (validates the link-length derivation, not the servo mapping)."""

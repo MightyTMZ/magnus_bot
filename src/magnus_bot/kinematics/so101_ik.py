@@ -42,27 +42,55 @@ class SO101Kinematics:
 
     def forward(self, joints: dict[str, float]) -> np.ndarray:
         """Fingertip position [x, y, z] (arm frame, meters) for model-convention joint angles."""
+        return self.link_points(joints)[-1]
+
+    def link_points(self, joints: dict[str, float]) -> np.ndarray:
+        """The arm as a 4-point polyline [shoulder, elbow, wrist, tip] (arm frame, meters).
+
+        Same model as :meth:`forward` (the tip is the last point), but it also exposes the
+        intermediate joint positions so callers can test the whole arm for clearance, not just
+        where the fingertip lands (see :mod:`magnus_bot.motion.collision`). The "shoulder" point is
+        the shoulder_lift axis, ``shoulder_forward`` ahead of the yaw axis at ``base_height``.
+        """
         pan = joints["shoulder_pan"]
         a0 = joints["shoulder_lift"]
         a1 = a0 + joints["elbow_flex"]
         a2 = a1 + joints["wrist_flex"]
         m = self.model
-        r = (
-            m.shoulder_forward
-            + m.upper_arm * math.sin(a0)
-            + m.forearm * math.sin(a1)
-            + m.wrist_to_tip * math.sin(a2)
+        r_sh = m.shoulder_forward
+        z_sh = m.base_height
+        r_el = r_sh + m.upper_arm * math.sin(a0)
+        z_el = z_sh + m.upper_arm * math.cos(a0)
+        r_wr = r_el + m.forearm * math.sin(a1)
+        z_wr = z_el + m.forearm * math.cos(a1)
+        r_tip = r_wr + m.wrist_to_tip * math.sin(a2)
+        z_tip = z_wr + m.wrist_to_tip * math.cos(a2)
+        cos_p, sin_p = math.cos(pan), math.sin(pan)
+        return np.array(
+            [
+                [r_sh * cos_p, r_sh * sin_p, z_sh],
+                [r_el * cos_p, r_el * sin_p, z_el],
+                [r_wr * cos_p, r_wr * sin_p, z_wr],
+                [r_tip * cos_p, r_tip * sin_p, z_tip],
+            ],
+            dtype=float,
         )
-        z = (
-            m.base_height
-            + m.upper_arm * math.cos(a0)
-            + m.forearm * math.cos(a1)
-            + m.wrist_to_tip * math.cos(a2)
-        )
-        return np.array([r * math.cos(pan), r * math.sin(pan), z], dtype=float)
 
-    def inverse(self, target_xyz: np.ndarray, roll: float = 0.0, elbow: str = "up") -> dict[str, float]:
-        """Model-convention joint angles placing the fingertip at ``target_xyz`` for a top-down grasp.
+    def inverse(
+        self,
+        target_xyz: np.ndarray,
+        roll: float = 0.0,
+        elbow: str = "up",
+        pitch: float = 0.0,
+    ) -> dict[str, float]:
+        """Model-convention joint angles placing the fingertip at ``target_xyz`` for a tilted grasp.
+
+        ``pitch`` is the approach tilt of the tool away from straight-down, in radians, in the
+        vertical plane the arm reaches along: ``0`` is a pure top-down grasp (tool axis a2 = pi);
+        positive values tilt the tool so the fingertip reaches further out (the long wrist_to_tip
+        link then adds horizontal reach). The board is NOT fully reachable top-down with the
+        measured rig -- the d/e files fall outside both arms' top-down workspace -- so centre
+        squares need a small positive pitch (reach.py picks the smallest that works per square).
 
         ``roll`` sets wrist_roll (jaw orientation). ``elbow`` selects the "up" or "down" branch.
         Raises :class:`Unreachable` if the planar 2-link cannot reach the implied wrist point.
@@ -75,14 +103,17 @@ class SO101Kinematics:
         pan = math.atan2(y, x)
         r = math.hypot(x, y)
 
-        # Tool points straight down (a2 = pi), so the wrist sits wrist_to_tip ABOVE the tip.
-        dr = r - m.shoulder_forward
-        dz = (z + m.wrist_to_tip) - m.base_height
+        # Tool axis a2 = pi - pitch (pitch=0 -> straight down). The wrist sits back along that axis
+        # from the tip: wrist_to_tip*cos(pitch) above it and wrist_to_tip*sin(pitch) toward the
+        # base. Tilting pulls the wrist radially inward, so the 2-link needs less reach while the
+        # tip still lands at r -- that is what buys the extra horizontal range.
+        dr = r - m.shoulder_forward - m.wrist_to_tip * math.sin(pitch)
+        dz = (z + m.wrist_to_tip * math.cos(pitch)) - m.base_height
         reach = math.hypot(dr, dz)
         if reach > m.upper_arm + m.forearm or reach < abs(m.upper_arm - m.forearm):
             raise Unreachable(
-                f"target {target_xyz} needs wrist reach {reach:.4f} m, outside "
-                f"[{abs(m.upper_arm - m.forearm):.4f}, {m.upper_arm + m.forearm:.4f}]"
+                f"target {target_xyz} at pitch {pitch:.3f} rad needs wrist reach {reach:.4f} m, "
+                f"outside [{abs(m.upper_arm - m.forearm):.4f}, {m.upper_arm + m.forearm:.4f}]"
             )
 
         cos_elbow = (reach**2 - m.upper_arm**2 - m.forearm**2) / (2 * m.upper_arm * m.forearm)
@@ -95,7 +126,7 @@ class SO101Kinematics:
         beta = math.atan2(dr, dz)  # direction from shoulder to wrist, measured from +z
         a0 = beta - math.atan2(m.forearm * math.sin(q2), m.upper_arm + m.forearm * math.cos(q2))
         a1 = a0 + q2
-        wrist_flex = math.pi - a1  # so a2 = a1 + wrist_flex = pi (tool vertical, pointing down)
+        wrist_flex = math.pi - pitch - a1  # so a2 = a1 + wrist_flex = pi - pitch (tool tilt)
 
         return {
             "shoulder_pan": pan,

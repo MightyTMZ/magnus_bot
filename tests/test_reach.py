@@ -94,6 +94,29 @@ def test_map_round_trips_through_json():
     assert ReachabilityMap.from_dict(json.loads(json.dumps(rmap.to_dict()))) == rmap
 
 
+def test_pitch_opens_squares_top_down_cannot_reach(rig):
+    """Top-down leaves 16 squares unreachable; a tilt opens some of them (the pitch fix)."""
+    config, placements, kin = rig
+    s, zg = config.board.square_size, config.arms.z_grasp
+    top_union = set().union(*compute_reachability(placements, kin, zg, s).reachable.values())
+    assert len(top_union) == 48  # matches test_rig_numbers_top_down
+
+    tilt = compute_reachability(placements, kin, zg, s, max_pitch=np.radians(50))
+    tilt_union = set().union(*tilt.reachable.values())
+    newly = tilt_union - top_union
+    assert newly, "a tilted approach should reach squares top-down cannot"
+    # every newly-opened square carries a genuinely tilted pose
+    for f, r in newly:
+        assert tilt.pose(min(tilt.arms_reaching(f, r)), f, r).pitch > 0.0
+
+
+def test_pitch_leans_only_where_needed(rig):
+    config, placements, kin = rig
+    tilt = compute_reachability(placements, kin, config.arms.z_grasp, config.board.square_size,
+                                max_pitch=np.radians(50))
+    assert tilt.pose("follower_1", 7, 3).pitch == 0.0  # h4 in front of follower_1 stays top-down
+
+
 def test_reach_report_runs_and_writes_the_map(tmp_path, capsys):
     script = Path(__file__).resolve().parents[1] / "scripts" / "reach_report.py"
     spec = importlib.util.spec_from_file_location("reach_report", script)
