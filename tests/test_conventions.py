@@ -44,10 +44,10 @@ def urdf_fk():
             np.array(axis.get("xyz").split(), dtype=float) if axis is not None else np.zeros(3),
         )
 
-    def fk(q):
-        """Fingertip (gripper_frame_link) position in base_link for URDF joint angles ``q``."""
+    def fk(q, chain=CHAIN):
+        """Position (base_link) of the last joint frame in ``chain``; default the fingertip."""
         t = np.eye(4)
-        for name in CHAIN:
+        for name in chain:
             xyz, rpy, axis = joints[name]
             step = np.eye(4)
             step[:3, :3], step[:3, 3] = _rpy(*rpy), xyz
@@ -90,6 +90,26 @@ def test_ik_target_is_hit_in_the_urdf(urdf_fk):
     target = np.array([0.15, 0.04, 0.028])
     q = model_to_urdf(SO101Kinematics().inverse(target))
     assert np.linalg.norm(fk(q) - origin - target) < 1e-4
+
+
+def test_nudge_directions_match_urdf(urdf_fk):
+    # The physical directions scripts/joint_zero_check.py tells the operator (NUDGE, POSE).
+    fk, _ = urdf_fk
+    nudge = 0.17
+
+    def moved(joint, upto):
+        chain = CHAIN[: CHAIN.index(upto) + 1] if upto in CHAIN else (*ARM_JOINTS, upto)
+        return fk({joint: nudge}, chain) - fk({}, chain)
+
+    assert moved("shoulder_pan", "wrist_roll")[1] < 0  # arm swings to its right (-y)
+    d = moved("shoulder_lift", "elbow_flex")
+    assert d[0] > 0 and d[2] < 0  # elbow forward and down
+    assert moved("elbow_flex", "wrist_flex")[2] < 0  # wrist down
+    assert moved("wrist_flex", "gripper_frame_joint")[2] < 0  # gripper tip down
+    jaw = fk({}, (*ARM_JOINTS, "gripper")) - fk({}, CHAIN[:5])
+    assert jaw[1] > 0 and jaw[2] > 0  # moving jaw up-left of the roll axis, seen from behind
+    d = moved("wrist_roll", "gripper")
+    assert d[1] > 0 and d[2] < 0  # up-left -> down-left: counter-clockwise seen from behind
 
 
 def test_mapping_round_trips():

@@ -5,7 +5,7 @@ Keep it under ~200 lines by summarizing old entries. Never delete decisions — 
 
 ## Status
 Milestone **M0 (scaffold + tests green)**: COMPLETE. No hardware has been driven by magnus_bot
-code yet. **89 tests pass, 1 skip** (placo cross-check, needs the `ik` env); ruff clean on
+code yet. **100 tests pass, 1 skip** (placo cross-check, needs the `ik` env); ruff clean on
 `src/ tests/ scripts/` (`RF-DETR/` has 7 lint findings).
 **M1 Phase 0 (2026-10-24):** 0a env built (lerobot + serial-motors + magnus_bot[hardware] in
 `C:\projects\lerobot\.venv`). 0b done (URDF link lengths in `SO101Model`; nominal limits in
@@ -18,51 +18,34 @@ per-piece `gripper_closed` (see Open questions) + the non-king piece dims.
 **M1 step 1a (2026-10-24):** IK model <-> URDF-zero mapping done and URDF limits in place.
 Live still refuses until 1b (URDF <-> servo, needs the rig).
 **M2 step 3 (2026-10-24):** reachability map + `reach_report.py` done (top-down IK).
+**M1 1b tooling (2026-10-24):** `scripts/joint_zero_check.py` + `ServoMap` ready; needs the rig.
 
-## Last session (2026-10-24, Lucas, part 3) — step 3 reachability
-- `kinematics/reach.py`: `compute_reachability(..., z_clear=, pad_xyz=, limits=)` and
-  `can_reach_point`. A point is reachable iff top-down IK solves at its height AND at z_clear,
-  with every URDF-convention joint inside the URDF limits (same check the executor makes).
-  `ReachabilityMap.to_dict` / `from_dict` for caching.
-- `scripts/reach_report.py`: grids at grasp height and grasp + z_clear, configured pad / bins /
-  stash, an off-board pad search (recommends the most central point both arms reach), `--out`
-  JSON, and what-ifs: `--z-clear`, `--riser`.
-- `tests/test_reach.py`: own-side reach, mirror symmetry, pinned rig numbers, pad reach, every
-  mapped square actually plans in the sim executor, JSON round trip, the script runs.
-- NOT wired into the CLI/demo yet: with the rig's z_clear the computed map is empty, so every
-  move would be Unassignable. Wire it (cached `--out` JSON -> assigner) after the REACH fix.
-- Tilt / riser analysis for the REACH decision: see Known issues.
+## Last session (2026-10-24, Lucas, part 4) — tooling for step 1b
+- `kinematics/conventions.py`: `ServoMap` (per-arm `servo = sign·urdf + offset`, radians),
+  `urdf_to_servo` / `servo_to_urdf` / `model_to_servo` (the live `to_command`), `servo_limits`
+  (URDF limits in servo angles), JSON load/save, and `fit_servo_map` (sign from each nudge's
+  direction, offset from the L reading; raises `NudgeError` if a nudge is < 3° or another joint
+  moved more, which also catches scrambled servo IDs).
+- `scripts/joint_zero_check.py`: guided, read-only fit for one arm (procedure in
+  docs/joint_conventions.md). Ends with a fingertip-on-table check (FK should say ~0 cm) and
+  writes `hardware/servo_maps/<arm>.json`. Not run on hardware yet (no lerobot on the Mac).
+- `scripts/gripper_read.py --degrees`: passes `use_degrees=True`; without the flag, unchanged.
+- Tests: nudge directions pinned against the URDF; fit/scramble/limits/JSON; the guided script
+  end to end with a fake arm (`tests/test_servo_map.py`).
 
-## Session before (2026-10-24, Lucas, part 2) — step 1a
-- `kinematics/conventions.py`: `model_to_urdf` / `urdf_to_model` (sign + offset per joint;
-  table in docs/joint_conventions.md). The IK keeps its own convention (Alex's design).
-- `SO101Model`: added `shoulder_forward = 0.0304` (shoulder_lift axis is 3.04 cm ahead of the
-  yaw axis; ignoring it was a ~3.1 cm mean tip error) and corrected `wrist_to_tip` to the
-  in-plane 0.1594 (was the 3-D 0.1605). IK uses `shoulder_forward` (2 lines). Limits are now
-  the URDF limits (URDF-zero radians); `SimArm` clamps to them.
-- `tests/test_conventions.py`: numpy FK of the URDF chain (no placo). Model FK == URDF FK to
-  < 0.1 mm at `wrist_roll = 0`; roll != 0 is approximate (tip 7.9 mm off the roll axis).
-- Executor sim now commands URDF-zero angles by default (`to_command` = `model_to_urdf`) and
-  checks the URDF limits. Wide test limits removed. Sim tests use a 6 cm `z_clear` because
-  the rig's 14 cm is infeasible top-down (see REACH).
-
-## Earlier (2026-10-24, Lucas, part 1)
-- `motion/trajectory.py`: `plan_joint_trajectory` + `segment_duration`. Segment time =
-  max over joints of `1.875 · |Δq| / (v_max · speed_scale)` (1.875 = min-jerk peak/average
-  speed), so joints start/stop together and none exceeds its limit. PLACEHOLDER per-joint
-  `MAX_JOINT_VELOCITY` in `kinematics/model.py` (~1/3 of STS3215 no-load speed).
-- `orchestration/executor.py`: modes dry-run (default) / `simulate=True` (SimArm only) /
-  `live=True` (needs `measured: true` AND a `to_command` IK -> servo map, else refuses). Plans
-  the WHOLE move (IK + limit check + trajectories) before any motion; Unreachable /
-  `JointLimitError` abort with zero commands. One arm at a time; each arm returns to its rest
-  pose (its pose at move start) before the next moves (clears the pad). Verifies joints after
-  each trajectory (0.05 rad, gripper excluded: it stalls on the piece). Any fault -> every arm
-  `hold()` -> `ExecutionFault`.
-- FIXED an IK bug: `elbow="up"` (the default) returned the elbow-DOWN branch — at h4 the elbow
-  was 5.4 cm above the table, over the board, below piece tops. Sign fixed in `so101_ik.py`;
-  pinned by `test_elbow_up_is_above_down`.
-- Ran a reach check with the real measurements (see Known issues: REACH). Big finding.
-- Reviewed teammates' new work (not yet integrated, see "Other workstreams").
+## Earlier sessions (2026-10-24, Lucas) — summary
+- **Trajectory + executor (M1 step 2):** `plan_joint_trajectory` times each segment by the
+  slowest joint (`1.875·|Δq| / (v_max·speed_scale)`; PLACEHOLDER `MAX_JOINT_VELOCITY`). The
+  executor runs dry-run / `simulate` / `live` (live needs `measured: true` + `to_command`). It
+  plans the whole move before moving, one arm at a time, back to rest after each transfer,
+  verifies joints (gripper excluded) and holds every arm on any fault (`ExecutionFault`).
+- **IK fixes (1a):** `elbow="up"` returned the elbow-down branch (fixed, pinned).
+  `SO101Model.shoulder_forward = 0.0304` (was a ~3.1 cm tip error) and in-plane
+  `wrist_to_tip = 0.1594`. `model_to_urdf` / `urdf_to_model`; URDF limits; numpy URDF FK
+  cross-check (`tests/test_conventions.py`, < 0.1 mm at roll 0). Sim commands URDF angles.
+- **Reachability (step 3):** `compute_reachability` (grasp AND hover heights, URDF limits),
+  `reach_report.py` (`--z-clear`, `--riser`, pad search, `--out`). Not wired into the CLI/demo:
+  at the rig's z_clear the map is empty. Findings in Known issues: REACH.
 
 ## Other workstreams (not integrated with src/magnus_bot yet)
 - **`RF-DETR/` (Aurick): working standalone vision loop.** Webcam -> Roboflow hosted model
@@ -79,12 +62,15 @@ Live still refuses until 1b (URDF <-> servo, needs the rig).
   frontend/backend") — team to decide (Open questions).
 
 ## Next steps (ordered)
-1. **M1 1b — URDF zero -> servo (Alex, rig, read-only).** Put the arm in known poses (URDF
-   zero = arm straight out horizontally, gripper in line), read degrees with
-   `gripper_read.py`, record sign + offset per joint vs. the URDF (expected ~identity for
-   `so101_new_calib`, unverified). Use the NEW calibration, not the obsolete repo backup.
-   Tighten `SO101Model.limits` from the calibration range. Then live `to_command` =
-   `urdf_to_servo(model_to_urdf(q))`.
+1. **M1 1b — URDF zero -> servo (Alex, rig, read-only, both arms).** Power-cycle (torque
+   off), then run `scripts/joint_zero_check.py --arm follower_1` (and `follower_2`) in the
+   lerobot env. It prints every pose and nudge direction. URDF zero is an **"L"**, NOT a
+   straight arm: upper arm nearly vertical (leaning 14° forward), forearm horizontal pointing
+   forward, gripper in line. Expect sign +1 / small offsets for `so101_new_calib` (unverified).
+   Commit `hardware/servo_maps/*.json`. A `NudgeError` naming another joint = scrambled IDs
+   (this covers the follower_2 open question). Then tighten `SO101Model.limits` from the NEW
+   calibration's ranges if smaller (not the obsolete repo backup). Live wiring:
+   `to_command=smap.model_to_servo, limits=smap.servo_limits(SO101Model().limits)`.
 2. **M1 — validate `LeRobotArm`** on one arm (slow), read-only first, then a single pick/place.
    Needs `--live` + operator approval + `measured: true`.
 3. ~~M2 — reachability~~ DONE 2026-10-24 (`reach_report.py`), except wiring the cached map
@@ -111,6 +97,8 @@ Live still refuses until 1b (URDF <-> servo, needs the rig).
   chess.com over the physical board (Tom's app)? Changes the opponent `MoveSource` and needs a
   Python <-> Next.js bridge. Note chess.com fair-play rules forbid engine moves vs. humans.
 - Real joint velocity limits (bench-tune `MAX_JOINT_VELOCITY`)?
+- follower_2: has it had the `gripper_read.py --all` servo-ID wiggle check, and is its
+  calibration current? Nothing records it (only follower_1's remap is logged).
 
 ## Decisions log
 - 2026-10-23: UCI canonical, python-chess owns legality; FEN for logging, SAN for display.

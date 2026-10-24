@@ -48,22 +48,47 @@ the gripper frame's own axis is 2.8° off it (negligible for a grasp).
 Joint limits (`SO101Model.limits`) are now the URDF limits below, in URDF-zero radians, and are
 checked on the URDF-convention commands (after the mapping).
 
-## URDF zero <-> servo (TODO, needs the rig)
+## URDF zero <-> servo (tooling DONE 2026-10-24; measurement needs the rig)
 
-For each arm joint, record, from the SO-101 URDF and the per-arm calibration JSON
-(`range_min`, `range_max`, `homing_offset`, `drive_mode`; see `hardware/calibration/`):
+Per arm, in radians (the unit `LeRobotArm` speaks):
 
 ```
-servo_deg = sign · (urdf_rad · 180/π) + offset_deg      # per joint
+servo = sign · urdf + offset      # per joint
 ```
 
 - **sign** (±1): does the servo count the same rotation direction as the URDF? (`drive_mode`.)
-- **offset_deg**: servo reading when the URDF model is at its zero pose.
-- **limits**: map `range_min`/`range_max` (servo counts) through the same relation into the
-  `JointLimit` (radians) in `kinematics/model.py`. Replace the PLACEHOLDER symmetric limits.
+- **offset**: servo reading when the arm is at the URDF zero pose.
 
-Reference calibration (`hardware/calibration/follower_1.calibration.bak.json`) records, per joint,
-the Feetech `range_min/range_max` (0..4095 counts) and `homing_offset`. The self-test's
+**Measure it with `scripts/joint_zero_check.py --arm <id>`** (read-only, torque off, lerobot env).
+It walks you through:
+
+1. Pose the URDF zero, which is an **"L"**: arm pointing straight ahead, upper arm nearly
+   vertical (leaning ~14° forward), forearm horizontal pointing forward, gripper in line with
+   the forearm, moving jaw up-left seen from behind the arm.
+2. Nudge each joint alone in its URDF-positive direction (printed; pinned against the URDF by
+   `tests/test_conventions.py::test_nudge_directions_match_urdf`):
+
+   | joint | URDF-positive from the L |
+   |-------|--------------------------|
+   | shoulder_pan | arm swings to its own right (clockwise seen from above) |
+   | shoulder_lift | upper arm tilts forward (elbow forward and down) |
+   | elbow_flex | forearm lowers (wrist down) |
+   | wrist_flex | gripper tip down |
+   | wrist_roll | counter-clockwise seen from behind the arm |
+
+   The sign is the direction the reading moved. If another joint's reading changes more, the
+   fit stops: scrambled servo ID or a bumped joint (doubles as the ID wiggle check).
+3. Rest the fingertip on the table: the fitted map + FK should predict ~0 cm height
+   (warns past 1.5 cm). Pose error in the L shows up here.
+4. Writes `hardware/servo_maps/<arm>.json` (`ServoMap` in `kinematics/conventions.py`).
+
+Live use: `smap = load_servo_map(...)`, then `Executor(..., live=True,
+to_command=smap.model_to_servo, limits=smap.servo_limits(SO101Model().limits))`.
+
+Limits: the URDF limits map through the same relation (`ServoMap.servo_limits`). Tighten them
+from the calibration range if a servo's usable range is smaller. Reference calibration
+(`hardware/calibration/follower_1.calibration.bak.json`, PRE-REMAP, obsolete) records, per
+joint, the Feetech `range_min/range_max` (0..4095 counts) and `homing_offset`. The self-test's
 `limits_deg()` converts counts to degrees as `(count − mid)·360/4095` with `mid =
 (range_min+range_max)/2`; mirror that when deriving limits.
 

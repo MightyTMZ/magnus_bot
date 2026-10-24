@@ -26,10 +26,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--config-dir", default=None)
     parser.add_argument("--all", action="store_true",
                         help="show every joint (wiggle one physical joint, see which NAME moves)")
+    parser.add_argument("--degrees", action="store_true",
+                        help="arm joints in degrees (use_degrees=True, as LeRobotArm runs) instead of "
+                             "LeRobot's default normalized range; the gripper stays percent")
     args = parser.parse_args(argv)
 
     spec = load_config(args.config_dir).arms.arms[args.arm]
-    robot = SO101Follower(SO101FollowerConfig(port=spec.port, id=spec.calibration_id))
+    units = {"use_degrees": True} if args.degrees else {}  # unset = LeRobot's default, as before
+    robot = SO101Follower(SO101FollowerConfig(port=spec.port, id=spec.calibration_id, **units))
     robot.bus.connect()  # bus only: no configure(), torque left as-is
     watching = "every joint" if args.all else "gripper.pos"
     print(f"{args.arm} on {spec.port}: move a joint by hand, watch {watching}. Ctrl-C to stop.")
