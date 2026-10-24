@@ -5,7 +5,7 @@ Keep it under ~200 lines by summarizing old entries. Never delete decisions — 
 
 ## Status
 Milestone **M0 (scaffold + tests green)**: COMPLETE. No hardware has been driven by magnus_bot
-code yet. **81 tests pass, 1 skip** (placo cross-check, needs the `ik` env); ruff clean on
+code yet. **89 tests pass, 1 skip** (placo cross-check, needs the `ik` env); ruff clean on
 `src/ tests/ scripts/` (`RF-DETR/` has 7 lint findings).
 **M1 Phase 0 (2026-10-24):** 0a env built (lerobot + serial-motors + magnus_bot[hardware] in
 `C:\projects\lerobot\.venv`). 0b done (URDF link lengths in `SO101Model`; nominal limits in
@@ -17,8 +17,23 @@ per-piece `gripper_closed` (see Open questions) + the non-king piece dims.
 **M1 step 2 (2026-10-24):** trajectory planner + executor joint path done, **sim only**.
 **M1 step 1a (2026-10-24):** IK model <-> URDF-zero mapping done and URDF limits in place.
 Live still refuses until 1b (URDF <-> servo, needs the rig).
+**M2 step 3 (2026-10-24):** reachability map + `reach_report.py` done (top-down IK).
 
-## Last session (2026-10-24, Lucas, part 2) — step 1a
+## Last session (2026-10-24, Lucas, part 3) — step 3 reachability
+- `kinematics/reach.py`: `compute_reachability(..., z_clear=, pad_xyz=, limits=)` and
+  `can_reach_point`. A point is reachable iff top-down IK solves at its height AND at z_clear,
+  with every URDF-convention joint inside the URDF limits (same check the executor makes).
+  `ReachabilityMap.to_dict` / `from_dict` for caching.
+- `scripts/reach_report.py`: grids at grasp height and grasp + z_clear, configured pad / bins /
+  stash, an off-board pad search (recommends the most central point both arms reach), `--out`
+  JSON, and what-ifs: `--z-clear`, `--riser`.
+- `tests/test_reach.py`: own-side reach, mirror symmetry, pinned rig numbers, pad reach, every
+  mapped square actually plans in the sim executor, JSON round trip, the script runs.
+- NOT wired into the CLI/demo yet: with the rig's z_clear the computed map is empty, so every
+  move would be Unassignable. Wire it (cached `--out` JSON -> assigner) after the REACH fix.
+- Tilt / riser analysis for the REACH decision: see Known issues.
+
+## Session before (2026-10-24, Lucas, part 2) — step 1a
 - `kinematics/conventions.py`: `model_to_urdf` / `urdf_to_model` (sign + offset per joint;
   table in docs/joint_conventions.md). The IK keeps its own convention (Alex's design).
 - `SO101Model`: added `shoulder_forward = 0.0304` (shoulder_lift axis is 3.04 cm ahead of the
@@ -31,7 +46,7 @@ Live still refuses until 1b (URDF <-> servo, needs the rig).
   checks the URDF limits. Wide test limits removed. Sim tests use a 6 cm `z_clear` because
   the rig's 14 cm is infeasible top-down (see REACH).
 
-## Session before (2026-10-24, Lucas, part 1)
+## Earlier (2026-10-24, Lucas, part 1)
 - `motion/trajectory.py`: `plan_joint_trajectory` + `segment_duration`. Segment time =
   max over joints of `1.875 · |Δq| / (v_max · speed_scale)` (1.875 = min-jerk peak/average
   speed), so joints start/stop together and none exceeds its limit. PLACEHOLDER per-joint
@@ -72,12 +87,12 @@ Live still refuses until 1b (URDF <-> servo, needs the rig).
    `urdf_to_servo(model_to_urdf(q))`.
 2. **M1 — validate `LeRobotArm`** on one arm (slow), read-only first, then a single pick/place.
    Needs `--live` + operator approval + `measured: true`.
-3. **M2 — reachability** (software): implement `kinematics/reach.compute_reachability` and
-   `scripts/reach_report.py` using IK + `model_to_urdf` + URDF limits at BOTH z_grasp and
-   z_clear; wire into assignment. Evidence for the REACH decision below.
+3. ~~M2 — reachability~~ DONE 2026-10-24 (`reach_report.py`), except wiring the cached map
+   into the CLI/demo, which waits for step 4.
 4. **Decide the REACH fix** (team; see Known issues). Top-down cannot hover high enough
-   anywhere, so this now blocks real games. Then re-plan the handoff pad (no off-board point
-   is reachable by both).
+   anywhere, so this blocks real games. Leading option: tilted-tool IK (≤ 40° tilt covers
+   every square at 14 cm, ≤ 22° at grasp height), optionally with risers. Then re-plan the
+   handoff pad (no off-board point is reachable by both arms in any variant tried).
 5. Replace the BIN/STASH "any arm" assumption in `planning/assigner.py` with measured reach.
 6. M4: wrap `RF-DETR/` behind `BoardSource` so the orchestrator owns game state and reads the
    camera only when both arms are at rest.
@@ -90,7 +105,8 @@ Live still refuses until 1b (URDF <-> servo, needs the rig).
   - `gripper_closed` PER PIECE (they differ by base diameter)  ->  configs/board.yaml:
     `gripper_closed_pct` (pawn/knight/bishop/rook/queen/king)
   - remaining piece heights + base diameters (only king measured so far) -> configs/board.yaml
-- REACH: tilted-tool IK, lower/adaptive traverse height, base risers, or a smaller board?
+- REACH: tilted-tool IK, base risers, lower/per-move traverse height, or a smaller board? (Data
+  in Known issues: REACH.) Also: how to avoid knocking neighbours over with a tilted approach.
 - Product goal: robots vs. human with Stockfish (current CLAUDE.md), or a human playing
   chess.com over the physical board (Tom's app)? Changes the opponent `MoveSource` and needs a
   Python <-> Next.js bridge. Note chess.com fair-play rules forbid engine moves vs. humans.
@@ -119,9 +135,20 @@ Live still refuses until 1b (URDF <-> servo, needs the rig).
   - At z_clear (14 cm): **0/64**. The wrist would need > 95° (URDF `wrist_flex` limit ±1.658)
     to point the tool down. The highest top-down hover anywhere is **9.6 cm** (b/g files),
     below the king (9.9 cm) and far below the 13.7 cm needed to carry a pawn over a king.
-  - So a top-down grasp cannot traverse over tall pieces at all. Options: tilted-tool IK
-    (rough model: ~60/64 at 14 cm with ≤45° tilt), routing/lift heights per move, base
-    risers, smaller board. Limits are the URDF nominals; the real servo range (1b) may differ.
+  - So a top-down grasp cannot traverse over tall pieces at all. Limits are the URDF nominals;
+    the real servo range (1b) may differ.
+  - Minimum tool tilt from vertical (planar model + URDF limits, tilt toward the base, the only
+    direction a 5-DoF SO-101 can tilt): grasp height 0° on 48 squares, up to 22° (d/e files
+    on ranks 1/8). Hover at 14 cm: 17–39° everywhere except a4/a5/h4/h5 (too close to the
+    base; impossible at any tilt). So **straight-down grasping still works on most squares;
+    only the lifted part of the move needs tilt**. No side grip needed anywhere.
+  - 6 cm riser under both bases: `reach_report.py --riser 0.06` gives 28/64 top-down at 14 cm
+    (52/64 at grasp height); with tilt, hover needs ≤ 28° and a4/a5/h4/h5 become possible.
+  - Knock-over risks to handle in the tilt work: the tilt is always toward the arm's base, so
+    the neighbour on the base side is the one at risk; descend along the tool axis; the
+    joint-space min-jerk descent strays ~3.5 mm sideways from a straight line (add Cartesian
+    sub-waypoints for DESCEND/LIFT); check gripper vs. neighbour pieces (board state + piece
+    dims) before moving, like the limit check; vision check after each robot move.
   - No off-board pad point is reachable by both arms. The farthest square on each arm's half
     (e1/e8) is 0.333 m from the base.
   - Consequence today: sim tests use h4h5 with a 6 cm z_clear; the rig config raises
