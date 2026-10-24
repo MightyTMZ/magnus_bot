@@ -16,15 +16,40 @@ export default function Home() {
   const [showAbandonConfirm, setShowAbandonConfirm] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Create Steel session on mount
+  // Create or restore Steel session on mount
   useEffect(() => {
     async function init() {
       try {
+        // Try to restore an existing session from localStorage
+        const stored = localStorage.getItem("steelSession");
+        if (stored) {
+          const { sessionId: storedId } = JSON.parse(stored);
+          const checkRes = await fetch(`/api/steel?sessionId=${storedId}`);
+          if (checkRes.ok) {
+            const data = await checkRes.json();
+            if (data.status === "live") {
+              setSessionId(data.sessionId);
+              setViewerUrl(data.viewerUrl);
+              setLoading(false);
+              return;
+            }
+          }
+          // Session is dead, clear it
+          localStorage.removeItem("steelSession");
+        }
+
+        // No valid session — create a new one
         const res = await fetch("/api/steel", { method: "POST" });
         if (!res.ok) throw new Error("Failed to create session");
         const data = await res.json();
         setSessionId(data.sessionId);
         setViewerUrl(data.viewerUrl);
+
+        // Persist to localStorage
+        localStorage.setItem(
+          "steelSession",
+          JSON.stringify({ sessionId: data.sessionId, viewerUrl: data.viewerUrl })
+        );
 
         // Navigate to chess.com
         await fetch("/api/steel/navigate", {
@@ -71,18 +96,8 @@ export default function Home() {
     };
   }, [sessionId]);
 
-  // Cleanup session on unmount
-  useEffect(() => {
-    return () => {
-      if (sessionId) {
-        fetch("/api/steel", {
-          method: "DELETE",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sessionId }),
-        });
-      }
-    };
-  }, [sessionId]);
+  // Note: session is intentionally NOT released on unmount so it persists across refreshes.
+  // Sessions auto-expire after the Steel timeout (15 min).
 
   const isInGame = gameUrl !== null;
 
