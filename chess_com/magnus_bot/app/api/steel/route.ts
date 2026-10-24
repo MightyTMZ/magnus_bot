@@ -7,12 +7,12 @@ export async function POST() {
   try {
     const session = await steel.sessions.create({
       useProxy: true,
-      timeout: 1800000, // 30 minutes
+      timeout: 15 * 60 * 1000, // 15 minutes
     });
 
     return NextResponse.json({
       sessionId: session.id,
-      sessionViewerUrl: session.sessionViewerUrl,
+      viewerUrl: session.debugUrl,
       websocketUrl: session.websocketUrl,
     });
   } catch (error) {

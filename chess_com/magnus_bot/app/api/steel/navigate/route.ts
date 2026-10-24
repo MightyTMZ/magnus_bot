@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { chromium } from "playwright";
 
 export async function POST(request: Request) {
   const { sessionId, url } = await request.json();
@@ -11,27 +12,15 @@ export async function POST(request: Request) {
     );
   }
 
+  let browser;
   try {
-    const response = await fetch(
-      `https://api.steel.dev/v1/sessions/${sessionId}/actions/navigate`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "steel-api-key": apiKey!,
-        },
-        body: JSON.stringify({ url }),
-      }
+    browser = await chromium.connectOverCDP(
+      `wss://connect.steel.dev?apiKey=${apiKey}&sessionId=${sessionId}`
     );
 
-    if (!response.ok) {
-      const text = await response.text();
-      console.error("Steel navigate failed:", text);
-      return NextResponse.json(
-        { error: "Failed to navigate" },
-        { status: 500 }
-      );
-    }
+    const context = browser.contexts()[0];
+    const page = context.pages()[0] ?? (await context.newPage());
+    await page.goto(url, { waitUntil: "domcontentloaded" });
 
     return NextResponse.json({ success: true });
   } catch (error) {
@@ -40,5 +29,9 @@ export async function POST(request: Request) {
       { error: "Failed to navigate" },
       { status: 500 }
     );
+  } finally {
+    if (browser) {
+      await browser.close().catch(() => {});
+    }
   }
 }

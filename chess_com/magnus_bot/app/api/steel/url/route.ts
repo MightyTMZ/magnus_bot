@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import WebSocket from "ws";
+import { chromium } from "playwright";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -13,8 +13,16 @@ export async function GET(request: Request) {
     );
   }
 
+  let browser;
   try {
-    const url = await getCdpCurrentUrl(sessionId, apiKey!);
+    browser = await chromium.connectOverCDP(
+      `wss://connect.steel.dev?apiKey=${apiKey}&sessionId=${sessionId}`
+    );
+
+    const context = browser.contexts()[0];
+    const page = context.pages()[0];
+    const url = page?.url() ?? "";
+
     return NextResponse.json({ url });
   } catch (error) {
     console.error("Failed to get URL via CDP:", error);
@@ -22,50 +30,9 @@ export async function GET(request: Request) {
       { error: "Failed to get current URL" },
       { status: 500 }
     );
+  } finally {
+    if (browser) {
+      await browser.close().catch(() => {});
+    }
   }
-}
-
-function getCdpCurrentUrl(
-  sessionId: string,
-  apiKey: string
-): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const ws = new WebSocket(
-      `wss://connect.steel.dev?apiKey=${apiKey}&sessionId=${sessionId}`
-    );
-
-    const timeout = setTimeout(() => {
-      ws.close();
-      reject(new Error("CDP connection timed out"));
-    }, 5000);
-
-    let messageId = 1;
-
-    ws.on("open", () => {
-      // Get the current page URL via CDP
-      ws.send(
-        JSON.stringify({
-          id: messageId,
-          method: "Target.getTargets",
-        })
-      );
-    });
-
-    ws.on("message", (data: WebSocket.Data) => {
-      const msg = JSON.parse(data.toString());
-      if (msg.id === messageId && msg.result?.targetInfos) {
-        const pageTarget = msg.result.targetInfos.find(
-          (t: { type: string }) => t.type === "page"
-        );
-        clearTimeout(timeout);
-        ws.close();
-        resolve(pageTarget?.url ?? "");
-      }
-    });
-
-    ws.on("error", (err: Error) => {
-      clearTimeout(timeout);
-      reject(err);
-    });
-  });
 }

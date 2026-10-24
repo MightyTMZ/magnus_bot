@@ -23,7 +23,7 @@ export default function Home() {
         if (!res.ok) throw new Error("Failed to create session");
         const data = await res.json();
         setSessionId(data.sessionId);
-        setViewerUrl(data.sessionViewerUrl);
+        setViewerUrl(data.viewerUrl);
 
         // Navigate to chess.com
         await fetch("/api/steel/navigate", {
@@ -31,7 +31,7 @@ export default function Home() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             sessionId: data.sessionId,
-            url: "https://www.chess.com",
+            url: "https://www.chess.com/",
           }),
         });
       } catch (err) {
