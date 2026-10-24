@@ -1,0 +1,44 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "magnus-bot"
+version = "0.0.0"
+description = "Two-arm SO-101 robot that plays the white side of a physical chess game against a human."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Alex Meng" }]
+dependencies = [
+    "numpy>=1.24",
+    "pyyaml>=6.0",
+    "chess>=1.11",
+]
+
+[project.optional-dependencies]
+# Live hardware. Installed separately from the LeRobot clone/environment; see HANDOVER.md.
+# magnus_bot's core (geometry, planning, sim) never imports lerobot.
+hardware = ["lerobot"]
+# Numeric IK cross-check only (never on the control path); see kinematics/so101_ik.py.
+ik = ["placo", "ikpy"]
+dev = ["pytest>=7", "ruff>=0.5"]
+
+[project.scripts]
+magnus-bot = "magnus_bot.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/magnus_bot"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 110
+src = ["src", "tests", "scripts"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E741"]  # ambiguous names like l/r read fine for left/right geometry

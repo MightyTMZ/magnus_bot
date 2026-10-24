@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Tooling caches
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Claude Code local settings (machine-specific)
+.claude/settings.local.json
+
+# Runtime data / logs (never commit captured runs)
+*.log
+logs/
+data/
+
+# Self-test outputs written next to scripts/hardware_selftest.py
+scripts/baseline.json
+scripts/report.json
+
+# LeRobot calibration lives in the user cache, not the repo; keep stray copies out
+# (reference copies under hardware/ are committed deliberately).
+*.calibration.json
