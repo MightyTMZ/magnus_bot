@@ -84,7 +84,8 @@ class SO101Kinematics:
         cos_elbow = (reach**2 - m.upper_arm**2 - m.forearm**2) / (2 * m.upper_arm * m.forearm)
         cos_elbow = max(-1.0, min(1.0, cos_elbow))  # guard float drift at the reach boundary
         q2 = math.acos(cos_elbow)
-        if elbow == "up":
+        # Angles grow away from +z, so q2 > 0 bends the elbow ABOVE the shoulder->wrist line.
+        if elbow == "down":
             q2 = -q2
 
         beta = math.atan2(dr, dz)  # direction from shoulder to wrist, measured from +z

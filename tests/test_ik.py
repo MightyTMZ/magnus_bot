@@ -38,6 +38,18 @@ def test_round_trip_is_tight(kin, elbow):
     assert checked > 100  # the grid really exercised the solver
 
 
+@pytest.mark.parametrize("target", [(0.0955, 0.0, Z), (0.15, 0.05, Z), (0.12, -0.05, 0.14)])
+def test_elbow_up_is_above_down(kin, target):
+    """The "up" branch puts the elbow higher than "down" (it must clear pieces on the board)."""
+    m = kin.model
+
+    def elbow_z(elbow):
+        lift = kin.inverse(np.array(target), elbow=elbow)["shoulder_lift"]
+        return m.base_height + m.upper_arm * math.cos(lift)
+
+    assert elbow_z("up") > elbow_z("down")
+
+
 def test_far_target_unreachable(kin):
     with pytest.raises(Unreachable):
         kin.inverse(np.array([0.40, 0.0, Z]))  # well past the 0.251 m 2-link reach

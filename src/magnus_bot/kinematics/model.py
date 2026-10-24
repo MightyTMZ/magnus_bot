@@ -31,6 +31,17 @@ JOINT_NAMES: tuple[str, ...] = (
 
 ARM_JOINTS: tuple[str, ...] = JOINT_NAMES[:5]  # the revolute joints IK solves for
 
+# Peak joint speed at speed_scale = 1.0, in rad/s (percent/s for the gripper). PLACEHOLDER:
+# deliberately well under the STS3215's ~4.7 rad/s no-load speed; tune on the bench (M1).
+MAX_JOINT_VELOCITY: dict[str, float] = {
+    "shoulder_pan": 1.5,
+    "shoulder_lift": 1.5,
+    "elbow_flex": 1.5,
+    "wrist_flex": 2.0,
+    "wrist_roll": 2.0,
+    "gripper": 100.0,
+}
+
 
 @dataclass(frozen=True)
 class JointLimit:
