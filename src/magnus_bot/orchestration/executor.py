@@ -69,6 +69,11 @@ STOP_SLACK = math.radians(1.6)
 EASE_STEP = math.radians(5.0)
 EASE_MIN_PITCH = math.radians(15.0)
 EASE_GRIP_DEPTH = 0.010
+# Leaving rest and coming back to it, the arm passes through a point this far out from its base
+# (m, along the line to the square) at the travel height: lift up, THEN back. A straight joint-space
+# swing from the square to rest dipped across the board and knocked pieces over (2026-10-25).
+VIA_REACH = 0.12
+VIA_PITCHES = (math.radians(45.0), math.radians(30.0), math.radians(15.0), 0.0)
 # Before the gripper closes on a piece or lets go of one, the arm must be at the pose it was sent to
 # (within VERIFY_TOLERANCE), waiting up to this long (s) for it to settle. 2026-10-25 live: the elbow
 # stalled short of the h4 place pose, the gripper opened on schedule, and the rook fell onto the
@@ -274,6 +279,26 @@ def _arm_waypoints(arm_steps, config, home, placement, kinematics, limits, to_co
     gripper = home["gripper"]
     waypoints = [home]
     checkpoints = []  # (waypoint index, phase) the arm must reach before the gripper acts
+
+    def via(xy_board: np.ndarray, grip: float) -> dict[str, float] | None:
+        """Up at travel height near the arm's own board edge, on the line to ``xy_board``; None if no
+        tilt reaches it (the move then goes without it)."""
+        xy = placement.board_to_arm(xy_board)
+        point = correction.apply(np.append(xy / max(np.hypot(*xy), 1e-9) * VIA_REACH, config.arms.z_clear))
+        for p in (choice.pitch, *VIA_PITCHES):
+            try:
+                cmd = (to_command or dict)(kinematics.inverse(point, pitch=p))
+                cmd["gripper"] = grip
+                check_limits(cmd, limits)
+            except (Unreachable, JointLimitError):
+                continue
+            if not stops or all(stops[n].lo - STOP_SLACK <= v <= stops[n].hi + STOP_SLACK
+                                for n, v in cmd.items() if n in stops):
+                return cmd
+        return None
+
+    if (start := via(arm_steps.steps[0].xyz[:2], gripper)) is not None:
+        waypoints.append(start)  # out of rest: up and over before reaching across the board
     for step in arm_steps.steps:
         if step.phase in GRIPPER_PHASES:
             checkpoints.append((len(waypoints) - 1, step.phase.value))
@@ -309,6 +334,8 @@ def _arm_waypoints(arm_steps, config, home, placement, kinematics, limits, to_co
             detail = ", ".join(f"{n} {d:.1f} deg" for n, d in past.items())
             raise BeyondServoStop(f"{where}: past the servo stop by {detail} [{choice.label}]")
         waypoints.append(command)
+    if (end := via(arm_steps.steps[-1].xyz[:2], gripper)) is not None:
+        waypoints.append(end)  # after the place: already up; now back toward the arm, still high
     waypoints.append(home)  # back to rest: clears the board (and the pad) for the other arm
     return waypoints, checkpoints
 

@@ -319,3 +319,19 @@ def test_servo_stop_check_picks_an_easier_grasp_but_keeps_one_that_is_barely_ove
     assert [round(math.degrees(c.pitch)) for c in eased[1:6]] == [40, 35, 30, 25, 20]
     assert eased[-1].grip_depth == pytest.approx(0.010)  # finally: stem near the tips
     assert math.degrees(STOP_SLACK) < math.degrees(VERIFY_TOLERANCE)  # never past what arrival allows
+
+
+def test_after_the_drop_off_the_arm_goes_up_then_back_before_rest():
+    # 2026-10-25: a straight joint-space swing from the square back to rest dipped across the board.
+    from magnus_bot.orchestration.executor import VIA_REACH
+
+    config = _low_clear()
+    arms, executor = _sim(config)
+    program = build_move_program(ROOK_H4, H4H5, _full_reach_map(config), config)
+    traj = executor.plan(program)[0]
+    release_at = dict((phase, i) for i, phase in traj.checkpoints)["release"]
+    kin, fix = SO101Kinematics(), config.arms.correction("follower_1")
+    tips = [fix.undo(kin.forward(urdf_to_model(s))) for s in traj.samples[release_at:]]
+    near_arm = [t for t in tips if abs(np.hypot(t[0], t[1]) - VIA_REACH) < 0.003]
+    assert near_arm, "never passes the point near the arm's edge"
+    assert near_arm[0][2] == pytest.approx(config.arms.z_clear, abs=0.003)  # still high when it gets there
