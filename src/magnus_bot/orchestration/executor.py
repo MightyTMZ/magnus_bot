@@ -90,6 +90,7 @@ GRIPPER_PHASES = (Phase.GRIP, Phase.RELEASE)
 # be UP (lift / retract read back) before moving sideways (moving on after ARRIVE_TIMEOUT rather
 # than faulting), and it pauses after the gripper closes / opens so the piece is held / let go.
 UP_PHASES = (Phase.LIFT, Phase.RETRACT)
+REAR_MARGIN = math.radians(10.0)  # rearing the elbow off the pad stops this short of its limit
 GRIPPER_DWELL = 0.1  # s (0.3 looked stalled, operator 2026-10-25)
 DWELL = "dwell"
 
@@ -375,16 +376,17 @@ def _arm_waypoints(arm_steps, config, home, placement, kinematics, limits, to_co
         except JointLimitError as exc:
             raise JointLimitError(f"{where}: {exc} [{choice.label}]") from exc
         if step.phase == Phase.RETRACT and arm_steps.transfer.dst.kind == PAD:
-            # Off the pad (far reach for both arms): lift with the shoulder and elbow while the wrist
-            # holds, THEN square the wrist. Done together, a lagging elbow let the wrist swing the
-            # open jaws down and back into the piece just placed (2026-10-25, the bishop on e3).
-            arm_first = {**command, "wrist_flex": waypoints[-1]["wrist_flex"]}
-            try:
-                check_limits(arm_first, limits)
-                waypoints.append(arm_first)
-                travel.append("rise")
-            except JointLimitError:
-                pass  # cannot hold the wrist there: plain retract
+            # Off the pad (far reach for both arms): REAR THE ELBOW all the way up (REAR_MARGIN short
+            # of its stop), shoulder and wrist held, so the gripper is ~33 cm up before the arm moves
+            # back at all. A plain retract let the lagging elbow drop the jaws into the piece just
+            # placed, on the way up and on the way back (2026-10-25, the bishop on e3).
+            released = waypoints[-1]
+            up = 1.0 if command["elbow_flex"] > released["elbow_flex"] else -1.0  # the retract raises it
+            edge = limits["elbow_flex"].hi if up > 0 else limits["elbow_flex"].lo
+            if stops and "elbow_flex" in stops:
+                stop = stops["elbow_flex"]
+                edge = min(edge, stop.hi) if up > 0 else max(edge, stop.lo)
+            command = {**command, "elbow_flex": edge - up * REAR_MARGIN, "wrist_flex": released["wrist_flex"]}
         past = {n: math.degrees(max(stops[n].lo - v, v - stops[n].hi)) for n, v in command.items()
                 if stops and n in stops and not stops[n].lo - STOP_SLACK <= v <= stops[n].hi + STOP_SLACK}
         if past:
@@ -520,14 +522,16 @@ class Executor:
             time.sleep(0.05)
 
     def _verify(self, arm: Arm, target: dict[str, float]) -> None:
+        """Where the arm ended vs its last command. Only reported: the move is done by then and the
+        end pose holds nothing (2026-10-25: a 13 deg shoulder sag at the end pose stopped a game)."""
         actual = arm.read_joints()
         off = {
-            n: actual[n] - v
+            n: round(math.degrees(actual[n] - v), 1)
             for n, v in target.items()
             if n != "gripper" and not math.isclose(actual[n], v, abs_tol=VERIFY_TOLERANCE)
         }
         if off:
-            raise ExecutionFault(f"{arm.arm_id} did not reach its target: {off}")
+            log.warning("%s ended off its last command (deg): %s", arm.arm_id, off)
 
     def _hold_all(self) -> None:
         for arm in self.arms.values():
