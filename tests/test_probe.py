@@ -148,3 +148,11 @@ def test_errors_that_cancel_on_average_are_still_reported():
     lines = verdict(reports)
     assert not any(line.startswith("geometry OK") for line in lines)
     assert any(line.startswith("GEOMETRY VARIES: g3 is off by -5 mm reach, -20 mm side") for line in lines)
+
+
+def test_probe_commands_corrected_heights_but_reports_against_the_command():
+    p = plan_probe("g3", F1, KIN, model_to_urdf, KIN.model.limits, square_size=SIZE, z=0.010,
+                   hover=0.06, pitch=0.0, gripper=10.0, z_correction=0.005)
+    assert KIN.forward(urdf_to_model(p.at))[2] == pytest.approx(0.015)  # commanded 5 mm higher
+    assert p.target_z == pytest.approx(0.010)  # the height we actually want
+    assert grade(p, dict(p.at)).model_z_mm == pytest.approx(0.0, abs=1e-6)

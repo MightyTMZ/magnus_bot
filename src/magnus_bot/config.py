@@ -62,6 +62,9 @@ class ArmsConfig:
     gripper_open: float  # gripper percent (0..100) fully open
     gripper_closed: float  # gripper percent when holding a piece
     arms: dict[str, ArmConfig]
+    # Per arm, added to every commanded fingertip height: the arm sits this much LOWER than the
+    # model says (measured by ruler with reach_probe.py --ask-height). Missing = 0.
+    z_correction: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -163,6 +166,7 @@ def load_config(config_dir: str | Path | None = None) -> Config:
             )
             for arm_id, spec in arms_raw["arms"].items()
         },
+        z_correction=_float_map(arms_raw, "z_correction"),
     )
 
     handoff = HandoffConfig(

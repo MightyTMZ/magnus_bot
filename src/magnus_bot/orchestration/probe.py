@@ -61,6 +61,7 @@ class ProbePlan:
     at: dict[str, float]  # joint command at the low held pose
     z2: float | None = None  # second held height (parallax), m; None = single height
     at2: dict[str, float] | None = None  # joint command at z2
+    z_correction: float = 0.0  # added to every commanded height (config arms.z_correction)
 
     def down(self, rest: Mapping[str, float], speed_scale: float, hz: float) -> list[dict[str, float]]:
         """Samples from ``rest`` to above the square to the low held pose."""
@@ -89,6 +90,7 @@ def plan_probe(
     pitch: float,
     gripper: float,
     z2: float | None = None,
+    z_correction: float = 0.0,
 ) -> ProbePlan:
     """Joint commands to hold the fingertip at height ``z`` over ``square`` (then at ``z2``, if
     given, for the parallax measurement; and at ``hover`` on the way in and out).
@@ -100,13 +102,13 @@ def plan_probe(
     x, y = placement.board_to_arm(xy)
 
     def command(height: float) -> dict[str, float]:
-        joints = to_command(kinematics.inverse(np.array([x, y, height]), pitch=pitch))
+        joints = to_command(kinematics.inverse(np.array([x, y, height + z_correction]), pitch=pitch))
         joints["gripper"] = gripper
         check_limits(joints, limits)
         return joints
 
     return ProbePlan(square, xy, z, above=command(hover), at=command(z),
-                     z2=z2, at2=command(z2) if z2 is not None else None)
+                     z2=z2, at2=command(z2) if z2 is not None else None, z_correction=z_correction)
 
 
 def remove_parallax(low_xy: np.ndarray, high_xy: np.ndarray, z_low: float, z_high: float) -> np.ndarray:
@@ -207,7 +209,7 @@ def analyze(
         square=plan.square,
         joint_error_deg=errors,
         model_mm=split_mm(model_xy - plan.target_xy, reach_dir),
-        model_z_mm=1000 * (tip[2] - plan.target_z),
+        model_z_mm=1000 * (tip[2] - plan.target_z - plan.z_correction),
         camera_mm=camera_mm,
         geometry_mm=geometry_mm,
         parallax_mm=parallax_mm,

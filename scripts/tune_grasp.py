@@ -257,8 +257,11 @@ def main(argv: list[str] | None = None, prompt=input) -> int:
     def make_shuttle(setting: Setting) -> ArmShuttle:
         pitch = math.radians(setting.pitch_deg)
         z_grasp = base_z + setting.z_offset_mm / 1000.0
-        if z_grasp < MIN_FINGERTIP_Z:
-            raise SettingInfeasible(f"fingertip would be {z_grasp * 1000:.1f} mm above the board "
+        # Tilting keeps the pads in place and lifts the tip (tilted_tip_target), so a level grasp can
+        # lower the pads onto a short stem while the tip itself stays clear of the board.
+        tip_z = z_grasp + kin.model.tip_to_pad * (1.0 - math.cos(pitch))
+        if tip_z < MIN_FINGERTIP_Z:
+            raise SettingInfeasible(f"fingertip would be {tip_z * 1000:.1f} mm above the board "
                                     f"(< {MIN_FINGERTIP_Z * 1000:.0f} mm: the jaw tips would scrape)")
         cfg = dataclasses.replace(config, arms=dataclasses.replace(
             config.arms, z_grasp=z_grasp, z_clear=args.hover))

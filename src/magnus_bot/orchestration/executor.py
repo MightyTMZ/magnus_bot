@@ -175,6 +175,7 @@ def plan_joint_program(
             where = f"{arm_steps.arm_id} {arm_steps.transfer.reason} {step.phase.value}"
             x, y = placement.board_to_arm(step.xyz[:2])
             target = tilted_tip_target(np.array([x, y, step.xyz[2]]), pitch, kinematics.model.tip_to_pad)
+            target[2] += config.arms.z_correction.get(arm_steps.arm_id, 0.0)  # the arm sits low
             try:
                 model = kinematics.inverse(target, pitch=pitch)
             except Unreachable as exc:

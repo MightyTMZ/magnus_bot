@@ -79,6 +79,15 @@ tip landed +29 +/- 2 mm toward follower_1's base on g3/f4/h4/f6: a GEOMETRY erro
   front of the stem. `tilted_tip_target` now aims the PADS at the top-down pad point (planner and
   reach map both). Height was never calibrated: `reach_probe.py --ask-height` records a ruler gap
   at each hold.
+- **Height measured:** tip 4.0 / 4.0 / 6.5 mm LOWER than commanded (g4/g5/h4) -> new per-arm
+  `arms.z_correction` (follower_1 +5 mm), added to every commanded height (executor + probe).
+- **Grasp test with pad aiming: 2/6** (one each way). Operator: still grabs the rook's TOP, and
+  "needs to be more level". Physics agrees: the pads sit 23 mm above the tips, so a near-vertical
+  grasp cannot get the pads below ~26 mm before the tips hit the board: on a short stem it can only
+  take the head. Pad height above the tip is 23*cos(tilt) (11 mm at 60, 8 mm at 70). Level grasps
+  (40-70 deg) plan at g4/g5 (80 hits the wrist limit). tune_grasp's scrape guard now checks the
+  TILTED tip height, so pads can go lower when level. Camera cannot tell a head grab from a stem
+  grab (both move the rook): watch the grasps.
 
 ## Earlier session (2026-10-24, Alex + Claude) — vision online, closed grasp-tuning loop
 - **Why:** live grasps kept missing (g3g4 at 20° tilt failed twice) and every miss had to be

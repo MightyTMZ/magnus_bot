@@ -92,7 +92,9 @@ def test_simulated_grip_happens_at_the_source_square():
     # here) carries ~1e-5 float drift that varies with the arm configuration; far below any
     # physical relevance (and 50x tighter than the grasp tolerance).
     assert xy == pytest.approx(board_geom.square_center(7, 3, config.board.square_size), abs=1e-4)
-    assert tip[2] == pytest.approx(config.arms.z_grasp, abs=1e-4)
+    # Commanded that much higher because the real arm sits that much low (arms.z_correction).
+    lift = config.arms.z_correction.get("follower_1", 0.0)
+    assert tip[2] == pytest.approx(config.arms.z_grasp + lift, abs=1e-4)
 
 
 def test_unreachable_move_aborts_before_any_motion():
@@ -180,3 +182,37 @@ def test_sim_defaults_to_model_to_urdf():
     _, explicit = _sim(config, to_command=model_to_urdf)
     program = build_move_program(ROOK_H4, H4H5, _full_reach_map(config), config)
     assert default.plan(program)[0].samples == explicit.plan(program)[0].samples
+
+
+class _RecordingKinematics(SO101Kinematics):
+    """Records every IK target the planner asks for."""
+
+    def __init__(self):
+        super().__init__()
+        self.targets = []
+
+    def inverse(self, target, **kwargs):
+        self.targets.append(tuple(target))
+        return super().inverse(target, **kwargs)
+
+
+def _planned_heights(z_correction):
+    config = _low_clear()
+    config = dataclasses.replace(config, arms=dataclasses.replace(config.arms, z_correction=z_correction))
+    rmap = _full_reach_map(config)
+    board = chess.Board(None)
+    board.set_piece_at(chess.H4, chess.Piece(chess.ROOK, chess.WHITE))
+    program = build_move_program(board, chess.Move.from_uci("h4h5"), rmap, config)
+    kin = _RecordingKinematics()
+    arms = {a: SimArm(a) for a in config.arms.arms}
+    for arm in arms.values():
+        arm.connect()
+    Executor(config, arms, rmap, simulate=True, kinematics=kin).plan(program)
+    return [z for _, _, z in kin.targets]
+
+
+def test_arm_z_correction_raises_every_commanded_height():
+    plain = _planned_heights({})
+    lifted = _planned_heights({"follower_1": 0.005, "follower_2": 0.005})
+    assert len(plain) == len(lifted) > 0
+    assert all(b - a == pytest.approx(0.005) for a, b in zip(plain, lifted, strict=True))

@@ -59,10 +59,19 @@ def test_too_steep_a_tilt_is_skipped_before_any_motion(tune, tmp_path, capsys):
 
 def test_grasp_heights_that_would_scrape_the_board_are_refused(tune, tmp_path, capsys):
     log = tmp_path / "sim.jsonl"
-    assert tune.main(["--pitches", "25", "--z-offsets=-4,0", "--trials", "2", "--log", str(log)]) == 0
+    assert tune.main(["--pitches", "0", "--z-offsets=-4,0", "--trials", "2", "--log", str(log)]) == 0
     out = capsys.readouterr().out
     assert "z -4 mm" in out and "jaw tips would scrape" in out
     assert {r["z_offset_mm"] for r in attempts(log)} == {0.0}  # only the safe height ran
+
+
+def test_a_level_grasp_may_lower_the_pads_because_the_tip_rises(tune, tmp_path, capsys):
+    # Pads 12 mm lower: refused straight down (tip into the board), allowed at 60 deg (tip lifts).
+    log = tmp_path / "sim.jsonl"
+    argv = ["--uci", "g4g5", "--pitches", "0,60", "--z-offsets=-12", "--trials", "2", "--log", str(log)]
+    assert tune.main(argv) == 0
+    assert {r["pitch_deg"] for r in attempts(log)} == {60.0}
+    assert "pitch 0 deg, z -12 mm" in capsys.readouterr().out
 
 
 def test_sim_misses_are_retried(tune, tmp_path):

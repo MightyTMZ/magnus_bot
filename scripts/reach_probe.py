@@ -79,15 +79,19 @@ class SaggingSimArm(SimArm):
 class SimCamera:
     """The vision server's stand-in in sim: sees the fingertip where the model puts it for the arm's
     current joints, shifted by ``offset_mm`` = (along the reach, to the arm's left), plus a parallax
-    of ``parallax_mm`` (board x, y) per 10 mm of fingertip height, like the real oblique camera."""
+    of ``parallax_mm`` (board x, y) per 10 mm of fingertip height, like the real oblique camera.
+    The simulated arm sits ``z_correction`` low, as the real one does (that is what the config's
+    correction compensates), so commanded heights land where intended."""
 
     def __init__(self, arm, placement, kinematics, to_model, square_size: float, offset_mm,
-                 parallax_mm=(0.0, 0.0)) -> None:
+                 parallax_mm=(0.0, 0.0), z_correction: float = 0.0) -> None:
         self.arm, self.placement, self.kin, self.to_model = arm, placement, kinematics, to_model
         self.square_size, self.offset_mm, self.parallax_mm = square_size, offset_mm, parallax_mm
+        self.z_correction = z_correction
 
     def read(self, fresh: bool = True, timeout: float = 8.0) -> BoardObservation:
         tip = self.kin.forward(self.to_model(self.arm.read_joints()))
+        tip[2] -= self.z_correction  # the physical arm sits this much below the model
         xy = self.placement.arm_to_board(tip[:2])
         u = unit(xy - self.placement.base_xy)
         xy = xy + (self.offset_mm[0] * u + self.offset_mm[1] * perp_left(u)) / 1000.0
@@ -193,7 +197,8 @@ def main(argv: list[str] | None = None, prompt=input) -> int:
         try:
             plans.append(plan_probe(square, placement, kin, to_command, limits, square_size=size,
                                     z=args.z, hover=args.hover, pitch=math.radians(args.pitch),
-                                    gripper=gripper, z2=z2))
+                                    gripper=gripper, z2=z2,
+                                    z_correction=config.arms.z_correction.get(args.arm, 0.0)))
         except (Unreachable, JointLimitError) as e:
             print(f"skipping {square}: cannot plan it ({e})", file=sys.stderr)
     if not plans:
@@ -231,7 +236,8 @@ def main(argv: list[str] | None = None, prompt=input) -> int:
             arm = SaggingSimArm(args.arm, math.radians(args.sim_sag_deg))
         else:
             arm = SimArm(args.arm)
-        reader = SimCamera(arm, placement, kin, to_model, size, camera_offset, sim_parallax)
+        reader = SimCamera(arm, placement, kin, to_model, size, camera_offset, sim_parallax,
+                           z_correction=config.arms.z_correction.get(args.arm, 0.0))
 
     arms = {args.arm: arm}
     reports = []
