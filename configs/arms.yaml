@@ -40,6 +40,8 @@ z_correction:       # the arm sits this much LOWER than the model
 # heads; operator: +2-3 mm more -> 3 mm.
 grasp_side_offset:
   follower_1: 0.003
+  follower_2: -0.003  # its wrist roll sits ~180 deg off, so the jaws open to the mirrored side:
+                      # rook c4c5 60/-9 live 2026-10-25: -3 mm 4/4, 0 1/2, +3 2/2
 
 # Default trajectory speed scale (0..1). Conservative by default.
 speed_scale: 0.3
