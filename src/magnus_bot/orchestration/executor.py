@@ -60,9 +60,10 @@ VERIFY_TOLERANCE = 0.05
 # sag (arms.z_correction), i.e. where the tip really goes.
 TABLE_CLEARANCE = 0.003
 # Choosing among grasps: a pose counts as reachable if no joint goes more than this past its servo's
-# physical stop (rad). Below the arrival check's tolerance, so a pose that works 1.5 deg short of a
-# stop (the rook's 60 deg on g, 2026-10-25) is kept; one 5 deg past (the queen at 60) is eased.
-STOP_SLACK = math.radians(2.5)
+# physical stop (rad). Under load the elbow stops ~1 deg BEFORE its nominal stop (2026-10-25: the h3
+# drop-off planned ~2.4 deg past it came up 3.4 deg short, over the 2.9 deg arrival tolerance), so
+# slack + 1 deg must stay under that tolerance. 1.6 keeps the rook's 60 deg on g (1.54 past).
+STOP_SLACK = math.radians(1.6)
 # When a tuned grasp cannot reach a square (e.g. h3-h6, beside follower_1's base), try steeper
 # approaches with the same grip height on the piece, then the stem nearer the tips (10 mm).
 EASE_STEP = math.radians(5.0)
