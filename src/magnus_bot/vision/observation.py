@@ -84,6 +84,14 @@ class HttpBoardReader:
     def health(self) -> dict:
         return self._get("/health", self.slack)
 
+    def snapshot(self) -> bytes:
+        """The latest annotated frame (JPEG: grid, pieces, the detected fingertip marker)."""
+        try:
+            with urlopen(self.url + "/frame.jpg", timeout=self.slack) as resp:
+                return resp.read()
+        except (URLError, OSError) as e:
+            raise VisionUnavailable(f"no frame from {self.url} ({e})") from e
+
     def _get(self, path: str, timeout: float) -> dict:
         try:
             with urlopen(self.url + path, timeout=timeout) as resp:

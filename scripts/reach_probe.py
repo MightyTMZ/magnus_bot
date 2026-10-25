@@ -247,10 +247,15 @@ def main(argv: list[str] | None = None, prompt=input) -> int:
         try:
             arm.connect()
             rest = arm.read_joints()
-            def look():
-                """Where the camera sees the fingertip now (board squares), or None."""
+            def look(square: str, height: float):
+                """Where the camera sees the fingertip now (board squares), or None. Live, also saves
+                the annotated frame (with the detected marker) next to the log, to check by eye."""
                 try:
-                    return reader.read(fresh=True, timeout=args.vision_timeout).marker
+                    marker = reader.read(fresh=True, timeout=args.vision_timeout).marker
+                    if args.live:
+                        shot = log_path.with_name(f"{log_path.stem}_{square}_{height * 1000:.0f}mm.jpg")
+                        shot.write_bytes(reader.snapshot())
+                    return marker
                 except VisionUnavailable as e:
                     print(f"  vision: {e}", file=sys.stderr)
                     return None
@@ -260,7 +265,7 @@ def main(argv: list[str] | None = None, prompt=input) -> int:
                 if args.live:
                     time.sleep(args.settle)
                 reached = median_joints(arm)
-                marker = look()
+                marker = look(plan.square, plan.target_z)
                 gap = None
                 if args.ask_height:  # the arm holds here while the operator measures
                     answer = prompt(f"  {plan.square}: gap from the green tip to the board, mm "
@@ -274,7 +279,7 @@ def main(argv: list[str] | None = None, prompt=input) -> int:
                     stream(arm, plan.raise_to_z2(args.speed, HZ), args.live)
                     if args.live:
                         time.sleep(args.settle)
-                    marker2 = look()
+                    marker2 = look(plan.square, plan.z2)
                 report = analyze(plan, reached, placement=placement, kinematics=kin, to_model=to_model,
                                  camera_xy=None if marker is None else np.array(marker) * size,
                                  camera_xy2=None if marker2 is None else np.array(marker2) * size,
