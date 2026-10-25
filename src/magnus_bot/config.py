@@ -16,6 +16,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import yaml
 
 DEFAULT_CONFIG_DIR = Path(__file__).resolve().parents[2] / "configs"
@@ -54,6 +55,36 @@ class ArmConfig:
 
 
 @dataclass(frozen=True)
+class ArmCorrection:
+    """Where one real arm lands vs its model, measured on the rig, added to every commanded fingertip
+    target (arm frame, m): the arm falls ``reach`` short along its reach, lands ``side`` to its RIGHT
+    (so commands go that much to its left) and sits ``z`` low. All zero = trust the model."""
+
+    reach: float = 0.0
+    side: float = 0.0
+    z: float = 0.0
+
+    def apply(self, target: np.ndarray) -> np.ndarray:
+        """The fingertip target to command so the real tip lands on ``target`` (arm frame)."""
+        x, y, z = (float(v) for v in target)
+        r = math.hypot(x, y)
+        if r == 0.0:
+            return np.array([x, y, z + self.z])
+        ux, uy = x / r, y / r  # along the reach; the arm's left is (-uy, ux)
+        return np.array([x + self.reach * ux - self.side * uy, y + self.reach * uy + self.side * ux,
+                         z + self.z])
+
+    def undo(self, commanded: np.ndarray) -> np.ndarray:
+        """Inverse of :meth:`apply`: where the real tip lands when the model tip is at ``commanded``."""
+        x, y, z = (float(v) for v in commanded)
+        rho = math.hypot(x, y)
+        along = math.sqrt(max(rho * rho - self.side * self.side, 0.0))  # = r + reach
+        phi = math.atan2(y, x) - math.atan2(self.side, along)
+        r = along - self.reach
+        return np.array([r * math.cos(phi), r * math.sin(phi), z - self.z])
+
+
+@dataclass(frozen=True)
 class ArmsConfig:
     edge_gap: dict[str, float]  # d per arm id: base yaw axis -> near board edge
     speed_scale: float  # default trajectory speed scale (0..1)
@@ -65,6 +96,18 @@ class ArmsConfig:
     # Per arm, added to every commanded fingertip height: the arm sits this much LOWER than the
     # model says (measured by ruler with reach_probe.py --ask-height). Missing = 0.
     z_correction: dict[str, float] = field(default_factory=dict)
+    # Per arm, camera-fitted (scripts/fit_arm_geometry.py): the arm falls this much SHORT along its
+    # reach / lands this much to its RIGHT. Commands go that much further / to its left. Missing = 0.
+    reach_correction: dict[str, float] = field(default_factory=dict)
+    side_correction: dict[str, float] = field(default_factory=dict)
+
+    def correction(self, arm_id: str) -> ArmCorrection:
+        return ArmCorrection(reach=self.reach_correction.get(arm_id, 0.0),
+                             side=self.side_correction.get(arm_id, 0.0),
+                             z=self.z_correction.get(arm_id, 0.0))
+
+    def corrections(self) -> dict[str, ArmCorrection]:
+        return {arm_id: self.correction(arm_id) for arm_id in self.arms}
 
 
 @dataclass(frozen=True)
@@ -173,6 +216,8 @@ def load_config(config_dir: str | Path | None = None) -> Config:
             for arm_id, spec in arms_raw["arms"].items()
         },
         z_correction=_float_map(arms_raw, "z_correction"),
+        reach_correction=_float_map(arms_raw, "reach_correction"),
+        side_correction=_float_map(arms_raw, "side_correction"),
     )
 
     handoff = HandoffConfig(

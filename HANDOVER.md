@@ -46,10 +46,27 @@ end; real camera link verified from the lerobot venv.
 square** (6/6 `not_picked` at 25/30/35 deg: tilt was never the problem). `scripts/reach_probe.py`
 (camera sees a green-painted fingertip) showed the motors reach their commands (< 0.5 deg) but the
 tip landed +29 +/- 2 mm toward follower_1's base on g3/f4/h4/f6: a GEOMETRY error.
-`edge_gap.follower_1` corrected 0.085 -> 0.114 (camera-calibrated). **Not yet re-verified live**
-(next step 0).
+`edge_gap.follower_1` corrected 0.085 -> 0.114 (camera-calibrated), then REFIT (part 3 below):
+base 0.078 + the arm falling 33 mm short (`arms.reach_correction`) + 2 mm right (`side_correction`).
 
-## Last session (2026-10-24, Alex + Claude, part 2) — reach probe, geometry calibrated
+## Last session (2026-10-24, Alex + Claude, part 3) — geometry refit (sideways misses explained)
+- **Live results that prompted it:** g4g5 confirmation at 50/-6 (2/2 earlier) went 0/4, operator
+  saw it OVERSHOOT toward the a-file badly. f4f5 at depth 15: 50 deg 1/4, 60 deg 2/4; operator:
+  gripper errs toward rank 8 (wants the base to rotate counter-clockwise more).
+- **Cause found (sideways):** edge_gap 0.114 had put the WHOLE 29-33 mm reach shortfall into the
+  base position. Pan angles computed from a base 36 mm too far out are too small, so squares off
+  the centre line land to the arm's right toward rank 1 (g3 -20, g4 -7, h4 -10 mm) and to its left
+  toward rank 8 (g6 +10). New `scripts/fit_arm_geometry.py` fits base gap + reach + side to every
+  live probe (joints read back -> model tip; camera tip with parallax removed): **edge_gap 0.078
+  (ruler said 0.085), reach_correction 0.033, side_correction 0.002; rms 10.4 -> 4.2 mm.**
+  `config.ArmCorrection` (reach / side / z) is applied to every commanded tip target in the
+  executor, the reach map (`compute_reachability(corrections=...)`) and the probe; z_correction is
+  now part of it. Effect on grasps: g4/f4 picks move 6-7 mm toward rank 1, g5/f5 3-4 mm toward rank 8.
+- **Not explained yet:** the 50 deg a-file overshoot. The fit is from TOP-DOWN probes; at 50 deg it
+  moves g4 only ~2 mm. A tilt-specific reach error (wrist joint zero? tip_to_pad?) would show in
+  `reach_probe.py --pitch 60`: the next live step.
+
+## Earlier session (2026-10-24, Alex + Claude, part 2) — reach probe, geometry calibrated
 - **Why:** after the live tuning run missed every time, the camera could only say "not picked".
   Measuring WHERE the arm goes split the miss into motors vs geometry.
 - **Vision server:** finds the green fingertip (HSV 33-55 / S>=55 / V>=120: measured paint is
@@ -190,12 +207,12 @@ tip landed +29 +/- 2 mm toward follower_1's base on g3/f4/h4/f6: a GEOMETRY erro
   frontend/backend") — team to decide (Open questions).
 
 ## Next steps (ordered)
-0. **Verify the calibration live, then grasp (Alex, rig).** (a) Vision server running; g3/h4/g5/g6
-   empty; `scripts/reach_probe.py --live --squares g3,h4,g5,g6`: expect camera offsets within a
-   few mm. If a residual remains, add it to edge_gap (reach) or note the side offset (no config
-   knob for lateral base offset / yaw yet: add one if needed). (b) Probe follower_2 the same way
-   (its 67 mm is a ruler value, likely wrong the same way). (c) Then the grasp tuning below.
-   Ruler cross-check: base yaw axis (round base motor centre) to the h-file edge should be ~114 mm.
+0. **Verify the refit live, then grasp (Alex, rig).** (a) Pieces off f4/f5/g4/g5/g3/g6;
+   `reach_probe.py --live --squares f4,f5,g4,g5,g3,g6` (top-down, expect every square within ~5 mm)
+   and the same with `--pitch 60` (measures the tilt-specific overshoot). Then
+   `fit_arm_geometry.py` refits from ALL probes (top-down only is the clean fit; if 60 deg
+   disagrees, the tilt error needs its own knob). (b) Grasp: g4g5 at 60 deg, z -12/-9/-6; f4f5 at
+   50/60 deg, depth 15. (c) Probe follower_2 the same way (67 mm is a ruler value).
 0c. **Grasp tuning live (Alex, rig).** Rook on g3, g4 empty, follower_1 at a safe
    near-board pose that does NOT hide g3/g4 from the camera. Terminal 1:
    `RF-DETR/.venv/Scripts/python.exe RF-DETR/vision_server.py --show`. Terminal 2 (lerobot venv):
@@ -291,8 +308,10 @@ tip landed +29 +/- 2 mm toward follower_1's base on g3/f4/h4/f6: a GEOMETRY erro
   moves. Grip is per PIECE (tuned once each); placement accuracy is per ARM (a kinematic
   calibration fitted from camera-measured errors, which generalizes to untested squares); the
   executor composes them, as the 2026-10-24 tilt decision already said.
-- 2026-10-24: Geometry is calibrated FROM THE CAMERA (reach_probe), not the ruler: the ruler
-  edge_gap was 29 mm off. Measure at two heights to remove parallax; fix the config, re-probe.
+- 2026-10-24: Geometry is calibrated FROM THE CAMERA (reach_probe), not the ruler. Measure at two
+  heights to remove parallax. Fit base gap AND the arm's own reach shortfall together
+  (`fit_arm_geometry.py`): one offset put into edge_gap fixes reach on the centre line but bends
+  every pan angle, which shows as sideways misses growing off the centre line.
 
 ## Known issues
 - **Vision limits (2026-10-24, open).** Piece TYPES are unreliable (use colors). Occupancy cannot

@@ -9,15 +9,21 @@
 # PER-ARM (MEASURED 2026-10-24): the two arms are NOT equidistant, so follower_1 reaches ~1.8 cm
 # less of the board than follower_2. A single scalar here is still accepted (applied to both arms).
 edge_gap:
-  follower_1: 0.114  # CAMERA-CALIBRATED 2026-10-24 (scripts/reach_probe.py): at the ruler value
-                     # 0.085 the tip landed +29 +/- 2 mm toward the base on g3/f4/h4/f6, i.e. the
-                     # yaw axis is that much farther out (0.085 was likely taken from the base front).
+  follower_1: 0.078  # CAMERA-FITTED 2026-10-24 (scripts/fit_arm_geometry.py, 7 probes): the base is
+                     # close to the ruler value (0.085); the arm itself falls 33 mm short (see
+                     # reach_correction). The earlier 0.114 put all of that shortfall into the base
+                     # position, which left pan angles too small: 7-20 mm misses to the arm's right
+                     # toward rank 1 (g3/g4/h4), and to its left toward rank 8 (g6).
   follower_2: 0.067  # ruler value, NOT yet probed: probably off the same way; probe before trusting.
 
-# Added to every commanded fingertip height, per arm: the arm sits this much LOWER than the model.
-# follower_1 MEASURED 2026-10-24 by ruler (reach_probe.py --ask-height): commanded 10 mm, tip at
-# 6 / 6 / 3.5 mm on g4 / g5 / h4, i.e. -4.8 mm on average.
-z_correction:
+# Where each real arm lands vs its model; added to every commanded fingertip target (m).
+# reach / side: CAMERA-FITTED by scripts/fit_arm_geometry.py from reach_probe logs (rms 10.4 -> 4.2 mm).
+# z: by ruler (reach_probe.py --ask-height): commanded 10 mm, tip at 6 / 6 / 3.5 mm on g4/g5/h4.
+reach_correction:   # the arm falls this much SHORT along its reach
+  follower_1: 0.033
+side_correction:    # the arm lands this much to its RIGHT (+ = command further to its left)
+  follower_1: 0.002
+z_correction:       # the arm sits this much LOWER than the model
   follower_1: 0.005
 
 # Default trajectory speed scale (0..1). Conservative by default.

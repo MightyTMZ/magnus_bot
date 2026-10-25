@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from magnus_bot.config import ArmCorrection
 from magnus_bot.geometry import board as board_geom
 from magnus_bot.geometry.frames import ArmPlacement
 from magnus_bot.kinematics.conventions import model_to_urdf
@@ -104,27 +105,32 @@ def reach_pose(
     max_pitch: float = 0.0,
     to_urdf: Callable[[dict[str, float]], dict[str, float]] = model_to_urdf,
     grip_depth: float | None = None,
+    correction: ArmCorrection | None = None,
 ) -> GraspPose | None:
     """Smallest-tilt grasp of board-frame ``xyz`` (also clearing z_clear), or ``None`` if unreached.
 
     Sweeps pitch 0..``max_pitch`` and returns the first that solves top-to-bottom (every height)
     with all joints inside their URDF limit -- the "lean as little as possible" policy.
     ``max_pitch=0`` is a pure top-down check (the default, so existing callers are unchanged).
-    ``grip_depth`` is where the stem sits in the jaws (see :func:`tilted_tip_target`).
+    ``grip_depth`` is where the stem sits in the jaws (see :func:`tilted_tip_target`); ``correction``
+    is the arm's measured landing error, so limits are checked on the joints actually commanded.
     """
     x, y = placement.board_to_arm(np.asarray(xyz[:2], dtype=float))
     heights = [float(xyz[2])] if z_clear is None else [float(xyz[2]), z_clear]
     pitch = 0.0
     while pitch <= max_pitch + 1e-9:
-        if all(_in_limits(kinematics, x, y, z, pitch, limits, to_urdf, grip_depth) for z in heights):
+        if all(_in_limits(kinematics, x, y, z, pitch, limits, to_urdf, grip_depth, correction)
+               for z in heights):
             return GraspPose(pitch=pitch)
         pitch += DEFAULT_PITCH_STEP
     return None
 
 
-def _in_limits(kinematics, x, y, z, pitch, limits, to_urdf, grip_depth=None) -> bool:
+def _in_limits(kinematics, x, y, z, pitch, limits, to_urdf, grip_depth=None, correction=None) -> bool:
     try:
         target = tilted_tip_target(np.array([x, y, z]), pitch, kinematics.model.tip_to_pad, grip_depth)
+        if correction is not None:
+            target = correction.apply(target)
         joints = to_urdf(kinematics.inverse(target, pitch=pitch))
     except Unreachable:
         return False
@@ -157,13 +163,15 @@ def compute_reachability(
     limits: Mapping[str, JointLimit] | None = None,
     max_pitch: float = 0.0,
     grip_depth: float | None = None,
+    corrections: Mapping[str, ArmCorrection] | None = None,
 ) -> ReachabilityMap:
     """Every square center at ``z_grasp`` (and ``z_clear``) per arm, plus the pad if given.
 
     ``limits`` default to the kinematics model's (URDF) limits. Pass ``z_clear`` for the map the
     assigner should use; leave it None to see raw grasp-height reach. ``max_pitch=0`` is top-down
     (leaves the d/e centre unreachable with the measured rig); pass max_pitch > 0 to let the arms
-    tilt into the centre, recording the chosen per-square pitch in ``poses``.
+    tilt into the centre, recording the chosen per-square pitch in ``poses``. ``corrections`` (per
+    arm, ``config.arms.corrections()``) checks the targets the executor will really command.
     """
     limits = limits or kinematics.model.limits
     reachable: dict[str, set[Square]] = {}
@@ -175,7 +183,7 @@ def compute_reachability(
             for r in range(board_geom.BOARD_SIZE):
                 xyz = np.append(board_geom.square_center(f, r, square_size), z_grasp)
                 pose = reach_pose(placement, kinematics, xyz, limits, z_clear, max_pitch,
-                                  grip_depth=grip_depth)
+                                  grip_depth=grip_depth, correction=(corrections or {}).get(arm_id))
                 if pose is not None:
                     squares.add((f, r))
                     arm_poses[(f, r)] = pose

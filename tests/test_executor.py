@@ -87,14 +87,15 @@ def test_simulated_grip_happens_at_the_source_square():
     # FK of the first fully-closed command, mapped back to the board, is h4 at grasp height.
     tip = SO101Kinematics().forward(urdf_to_model(grip))  # commands are URDF-zero angles
     placement = arm_placements(config.board.square_size, config.arms.edge_gap)["follower_1"]
-    xy = placement.arm_to_board(tip[:2])
+    # The model tip is commanded off the square by the arm's measured landing error (arms.*_correction):
+    # undoing that correction is where the real tip lands, which must be h4 at grasp height.
+    real = config.arms.correction("follower_1").undo(tip)
+    xy = placement.arm_to_board(real[:2])
     # 1e-4 m (0.1 mm): the model<->URDF round-trip (model_to_urdf in the command, urdf_to_model
     # here) carries ~1e-5 float drift that varies with the arm configuration; far below any
     # physical relevance (and 50x tighter than the grasp tolerance).
     assert xy == pytest.approx(board_geom.square_center(7, 3, config.board.square_size), abs=1e-4)
-    # Commanded that much higher because the real arm sits that much low (arms.z_correction).
-    lift = config.arms.z_correction.get("follower_1", 0.0)
-    assert tip[2] == pytest.approx(config.arms.z_grasp + lift, abs=1e-4)
+    assert real[2] == pytest.approx(config.arms.z_grasp, abs=1e-4)
 
 
 def test_unreachable_move_aborts_before_any_motion():

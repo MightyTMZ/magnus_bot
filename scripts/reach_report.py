@@ -80,6 +80,7 @@ def main(argv: list[str] | None = None) -> int:
     model = dataclasses.replace(model, base_height=model.base_height + args.riser)
     kin, limits = SO101Kinematics(model), model.limits
     placements = arm_placements(s, config.arms.edge_gap)
+    corrections = config.arms.corrections()  # measured landing errors (reach/side/height)
     pad = config.handoff.pad
     pad_xyz = np.array([pad.x, pad.y, pad.z])
 
@@ -88,9 +89,10 @@ def main(argv: list[str] | None = None) -> int:
     if not config.measured:
         print("NOTE: config.measured is false; some inputs are placeholders.")
 
-    grasp_only = compute_reachability(placements, kin, z_grasp, s)
+    grasp_only = compute_reachability(placements, kin, z_grasp, s, corrections=corrections)
     print(f"\nGrasp height only ({z_grasp} m):\n{render(grasp_only)}\n{summary(grasp_only)}")
-    rmap = compute_reachability(placements, kin, z_grasp, s, z_clear=z_clear, pad_xyz=pad_xyz)
+    rmap = compute_reachability(placements, kin, z_grasp, s, z_clear=z_clear, pad_xyz=pad_xyz,
+                                corrections=corrections)
     print(f"\nGrasp + hover at z_clear ({z_clear} m), what pick/place needs:\n{render(rmap)}\n"
           f"{summary(rmap)}")
 

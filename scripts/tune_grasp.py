@@ -271,7 +271,8 @@ def main(argv: list[str] | None = None, prompt=input) -> int:
         cfg = dataclasses.replace(config, arms=dataclasses.replace(
             config.arms, z_grasp=z_grasp, z_clear=args.hover))
         rmap = compute_reachability(placements, kin, cfg.arms.z_grasp, cfg.board.square_size,
-                                    z_clear=cfg.arms.z_clear, max_pitch=pitch, grip_depth=grip_depth)
+                                    z_clear=cfg.arms.z_clear, max_pitch=pitch, grip_depth=grip_depth,
+                                    corrections=cfg.arms.corrections())
         for sq in (home, away):
             sq_index = chess.parse_square(sq)
             if not rmap.can_reach(args.arm, chess.square_file(sq_index), chess.square_rank(sq_index)):

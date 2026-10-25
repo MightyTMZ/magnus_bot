@@ -165,6 +165,7 @@ def plan_joint_program(
     trajectories = []
     for arm_steps in program:
         placement = placements[arm_steps.arm_id]
+        correction = config.arms.correction(arm_steps.arm_id)  # where the real arm lands vs the model
         home = dict(rest[arm_steps.arm_id])
         gripper = home["gripper"]
         waypoints = [home]
@@ -175,9 +176,8 @@ def plan_joint_program(
                 gripper = config.arms.gripper_closed
             where = f"{arm_steps.arm_id} {arm_steps.transfer.reason} {step.phase.value}"
             x, y = placement.board_to_arm(step.xyz[:2])
-            target = tilted_tip_target(np.array([x, y, step.xyz[2]]), pitch, kinematics.model.tip_to_pad,
-                                       grip_depth)
-            target[2] += config.arms.z_correction.get(arm_steps.arm_id, 0.0)  # the arm sits low
+            target = correction.apply(tilted_tip_target(np.array([x, y, step.xyz[2]]), pitch,
+                                                        kinematics.model.tip_to_pad, grip_depth))
             try:
                 model = kinematics.inverse(target, pitch=pitch)
             except Unreachable as exc:

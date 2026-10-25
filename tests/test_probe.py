@@ -5,13 +5,17 @@ import math
 import numpy as np
 import pytest
 
+from magnus_bot.config import ArmCorrection
 from magnus_bot.geometry.frames import arm_placements
+from magnus_bot.geometry.transforms import perp_left, unit
 from magnus_bot.kinematics.conventions import model_to_urdf, urdf_to_model
 from magnus_bot.kinematics.so101_ik import SO101Kinematics, Unreachable
 from magnus_bot.orchestration.executor import JointLimitError
 from magnus_bot.orchestration.probe import (
     ProbeReport,
+    ProbeSample,
     analyze,
+    fit_geometry,
     plan_probe,
     remove_parallax,
     split_mm,
@@ -152,7 +156,57 @@ def test_errors_that_cancel_on_average_are_still_reported():
 
 def test_probe_commands_corrected_heights_but_reports_against_the_command():
     p = plan_probe("g3", F1, KIN, model_to_urdf, KIN.model.limits, square_size=SIZE, z=0.010,
-                   hover=0.06, pitch=0.0, gripper=10.0, z_correction=0.005)
+                   hover=0.06, pitch=0.0, gripper=10.0, correction=ArmCorrection(z=0.005))
     assert KIN.forward(urdf_to_model(p.at))[2] == pytest.approx(0.015)  # commanded 5 mm higher
     assert p.target_z == pytest.approx(0.010)  # the height we actually want
     assert grade(p, dict(p.at)).model_z_mm == pytest.approx(0.0, abs=1e-6)
+
+
+FIX = ArmCorrection(reach=0.033, side=0.002, z=0.005)
+
+
+def test_probe_aims_past_the_square_by_the_reach_and_side_correction():
+    p = plan_probe("g3", F1, KIN, model_to_urdf, KIN.model.limits, square_size=SIZE, z=0.010,
+                   hover=0.06, pitch=0.0, gripper=10.0, correction=FIX)
+    tip = KIN.forward(urdf_to_model(p.at))
+    target = np.append(F1.board_to_arm(p.target_xy), 0.010)
+    reach_dir = unit(target[:2])
+    assert (tip[:2] - target[:2]) @ reach_dir == pytest.approx(0.033, abs=1e-6)  # commanded further out
+    assert (tip[:2] - target[:2]) @ perp_left(reach_dir) == pytest.approx(0.002, abs=1e-6)  # and left
+    # A real arm that lands exactly as the correction says: no model gap, no geometry left over.
+    seen = F1.arm_to_board(FIX.undo(tip)[:2])
+    r = grade(p, dict(p.at), camera_xy=seen)
+    assert r.camera_mm == pytest.approx((0.0, 0.0), abs=1e-6)
+    assert r.model_mm == pytest.approx((0.0, 0.0), abs=1e-6)
+    assert r.geometry_mm == pytest.approx((0.0, 0.0), abs=1e-6)
+
+
+def test_correction_undo_inverts_apply():
+    target = np.array([0.21, -0.07, 0.012])
+    assert FIX.undo(FIX.apply(target)) == pytest.approx(target, abs=1e-12)
+
+
+def _samples(gap, fix, squares=("g3", "g4", "g5", "g6", "h4", "f4", "f5")):
+    """Probes of a rig whose base really sits ``gap`` off the board and lands ``fix`` off its model."""
+    truth = arm_placements(SIZE, gap)["follower_1"]
+    out = []
+    for sq in squares:
+        p = plan_probe(sq, F1, KIN, model_to_urdf, KIN.model.limits, square_size=SIZE, z=0.010,
+                       hover=0.06, pitch=0.0, gripper=10.0)
+        tip = KIN.forward(urdf_to_model(p.at))
+        out.append(ProbeSample(sq, tip[:2], truth.arm_to_board(fix.undo(tip)[:2])))
+    return out
+
+
+def test_fit_recovers_the_base_gap_and_the_reach_shortfall():
+    # The 2026-10-24 situation: base nearly where the ruler said, arm 33 mm short, a little right.
+    fit = fit_geometry(_samples(0.078, FIX), "follower_1", SIZE, start_gap=0.114)
+    assert fit.edge_gap == pytest.approx(0.078, abs=1e-6)
+    assert fit.correction.reach == pytest.approx(0.033, abs=1e-6)
+    assert fit.correction.side == pytest.approx(0.002, abs=1e-6)
+    assert fit.rms_mm == pytest.approx(0.0, abs=1e-3)
+
+
+def test_fit_needs_squares_spread_across_ranks():
+    with pytest.raises(ValueError, match="2\+ ranks"):
+        fit_geometry(_samples(0.078, FIX, squares=("f4", "g4", "h4")), "follower_1", SIZE, start_gap=0.1)

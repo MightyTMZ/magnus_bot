@@ -27,7 +27,8 @@ def rig():
 def _rmap(rig, z_clear=None, pad_xyz=None):
     config, placements, kin = rig
     return compute_reachability(
-        placements, kin, config.arms.z_grasp, config.board.square_size, z_clear=z_clear, pad_xyz=pad_xyz
+        placements, kin, config.arms.z_grasp, config.board.square_size, z_clear=z_clear, pad_xyz=pad_xyz,
+        corrections=config.arms.corrections(),
     )
 
 
@@ -104,10 +105,11 @@ def test_pitch_opens_squares_top_down_cannot_reach(rig):
     """Top-down leaves 16 squares unreachable; a tilt opens some of them (the pitch fix)."""
     config, placements, kin = rig
     s, zg = config.board.square_size, config.arms.z_grasp
-    top_union = set().union(*compute_reachability(placements, kin, zg, s).reachable.values())
+    fix = config.arms.corrections()
+    top_union = set().union(*compute_reachability(placements, kin, zg, s, corrections=fix).reachable.values())
     assert len(top_union) == 42  # matches test_rig_numbers_top_down (measured asymmetric rig)
 
-    tilt = compute_reachability(placements, kin, zg, s, max_pitch=np.radians(50))
+    tilt = compute_reachability(placements, kin, zg, s, max_pitch=np.radians(50), corrections=fix)
     tilt_union = set().union(*tilt.reachable.values())
     newly = tilt_union - top_union
     assert newly, "a tilted approach should reach squares top-down cannot"
@@ -119,7 +121,7 @@ def test_pitch_opens_squares_top_down_cannot_reach(rig):
 def test_pitch_leans_only_where_needed(rig):
     config, placements, kin = rig
     tilt = compute_reachability(placements, kin, config.arms.z_grasp, config.board.square_size,
-                                max_pitch=np.radians(50))
+                                max_pitch=np.radians(50), corrections=config.arms.corrections())
     assert tilt.pose("follower_1", 7, 3).pitch == 0.0  # h4 in front of follower_1 stays top-down
 
 

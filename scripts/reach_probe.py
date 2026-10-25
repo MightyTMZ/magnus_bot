@@ -38,7 +38,7 @@ from pathlib import Path
 import chess
 import numpy as np
 
-from magnus_bot.config import load_config
+from magnus_bot.config import ArmCorrection, load_config
 from magnus_bot.geometry.frames import arm_placements
 from magnus_bot.geometry.transforms import perp_left, unit
 from magnus_bot.hardware.sim_arm import SimArm
@@ -80,18 +80,18 @@ class SimCamera:
     """The vision server's stand-in in sim: sees the fingertip where the model puts it for the arm's
     current joints, shifted by ``offset_mm`` = (along the reach, to the arm's left), plus a parallax
     of ``parallax_mm`` (board x, y) per 10 mm of fingertip height, like the real oblique camera.
-    The simulated arm sits ``z_correction`` low, as the real one does (that is what the config's
-    correction compensates), so commanded heights land where intended."""
+    The simulated arm lands off its model by the config's ``correction`` (short, to its right, low),
+    as the real one does (that is what the correction compensates), so commands land where intended."""
 
     def __init__(self, arm, placement, kinematics, to_model, square_size: float, offset_mm,
-                 parallax_mm=(0.0, 0.0), z_correction: float = 0.0) -> None:
+                 parallax_mm=(0.0, 0.0), correction: ArmCorrection | None = None) -> None:
         self.arm, self.placement, self.kin, self.to_model = arm, placement, kinematics, to_model
         self.square_size, self.offset_mm, self.parallax_mm = square_size, offset_mm, parallax_mm
-        self.z_correction = z_correction
+        self.correction = correction or ArmCorrection()
 
     def read(self, fresh: bool = True, timeout: float = 8.0) -> BoardObservation:
         tip = self.kin.forward(self.to_model(self.arm.read_joints()))
-        tip[2] -= self.z_correction  # the physical arm sits this much below the model
+        tip = self.correction.undo(tip)  # the physical arm lands this far short / right / low
         xy = self.placement.arm_to_board(tip[:2])
         u = unit(xy - self.placement.base_xy)
         xy = xy + (self.offset_mm[0] * u + self.offset_mm[1] * perp_left(u)) / 1000.0
@@ -172,6 +172,7 @@ def main(argv: list[str] | None = None, prompt=input) -> int:
     size = config.board.square_size
     kin = SO101Kinematics()
     placement = arm_placements(size, config.arms.edge_gap)[args.arm]
+    correction = config.arms.correction(args.arm)
     gripper = args.gripper if args.gripper is not None else config.arms.gripper_closed
     stamp = time.strftime("%Y%m%d-%H%M%S") + ("" if args.live else "_sim")
     log_path = args.log or ROOT / "hardware" / "tuning_logs" / f"probe_{args.arm}_{stamp}.jsonl"
@@ -197,8 +198,7 @@ def main(argv: list[str] | None = None, prompt=input) -> int:
         try:
             plans.append(plan_probe(square, placement, kin, to_command, limits, square_size=size,
                                     z=args.z, hover=args.hover, pitch=math.radians(args.pitch),
-                                    gripper=gripper, z2=z2,
-                                    z_correction=config.arms.z_correction.get(args.arm, 0.0)))
+                                    gripper=gripper, z2=z2, correction=correction))
         except (Unreachable, JointLimitError) as e:
             print(f"skipping {square}: cannot plan it ({e})", file=sys.stderr)
     if not plans:
@@ -237,7 +237,7 @@ def main(argv: list[str] | None = None, prompt=input) -> int:
         else:
             arm = SimArm(args.arm)
         reader = SimCamera(arm, placement, kin, to_model, size, camera_offset, sim_parallax,
-                           z_correction=config.arms.z_correction.get(args.arm, 0.0))
+                           correction=correction)
 
     arms = {args.arm: arm}
     reports = []
@@ -285,6 +285,7 @@ def main(argv: list[str] | None = None, prompt=input) -> int:
                     "event": "probe", "time": time.time(), "arm": args.arm, "live": args.live,
                     "pitch_deg": args.pitch, "z_m": args.z, "z2_m": z2, "square_size_m": size,
                     "edge_gap_m": config.arms.edge_gap[args.arm],
+                    "correction_m": [correction.reach, correction.side, correction.z],
                     "commanded": plan.at, "reached": reached, "camera_squares": marker,
                     "camera_squares_z2": marker2,
                     **report.to_record(),

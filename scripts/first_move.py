@@ -74,6 +74,7 @@ def main(argv: list[str] | None = None) -> int:
     rmap = compute_reachability(
         placements, kin, config.arms.z_grasp, config.board.square_size,
         z_clear=config.arms.z_clear, max_pitch=pitch, grip_depth=grip_depth,
+        corrections=config.arms.corrections(),
     )
     for sq in (src, dst):
         if not rmap.can_reach(ARM, *sq):

@@ -27,8 +27,9 @@ from dataclasses import dataclass
 import chess
 import numpy as np
 
+from magnus_bot.config import ArmCorrection
 from magnus_bot.geometry import board as board_geom
-from magnus_bot.geometry.frames import ArmPlacement
+from magnus_bot.geometry.frames import ArmPlacement, arm_placements
 from magnus_bot.geometry.transforms import perp_left, unit
 from magnus_bot.kinematics.conventions import ARM_JOINTS
 from magnus_bot.kinematics.model import JointLimit
@@ -61,7 +62,7 @@ class ProbePlan:
     at: dict[str, float]  # joint command at the low held pose
     z2: float | None = None  # second held height (parallax), m; None = single height
     at2: dict[str, float] | None = None  # joint command at z2
-    z_correction: float = 0.0  # added to every commanded height (config arms.z_correction)
+    correction: ArmCorrection = ArmCorrection()  # the arm's measured landing error (config arms.*_correction)
 
     def down(self, rest: Mapping[str, float], speed_scale: float, hz: float) -> list[dict[str, float]]:
         """Samples from ``rest`` to above the square to the low held pose."""
@@ -90,25 +91,27 @@ def plan_probe(
     pitch: float,
     gripper: float,
     z2: float | None = None,
-    z_correction: float = 0.0,
+    correction: ArmCorrection | None = None,
 ) -> ProbePlan:
     """Joint commands to hold the fingertip at height ``z`` over ``square`` (then at ``z2``, if
-    given, for the parallax measurement; and at ``hover`` on the way in and out).
+    given, for the parallax measurement; and at ``hover`` on the way in and out). ``correction`` is
+    applied to every command, as the executor does, so the probe checks the calibration in use.
 
     Raises :class:`~magnus_bot.kinematics.so101_ik.Unreachable` or
     :class:`~magnus_bot.orchestration.executor.JointLimitError` before anything moves.
     """
     xy = square_xy(square, square_size)
     x, y = placement.board_to_arm(xy)
+    correction = correction or ArmCorrection()
 
     def command(height: float) -> dict[str, float]:
-        joints = to_command(kinematics.inverse(np.array([x, y, height + z_correction]), pitch=pitch))
+        joints = to_command(kinematics.inverse(correction.apply(np.array([x, y, height])), pitch=pitch))
         joints["gripper"] = gripper
         check_limits(joints, limits)
         return joints
 
     return ProbePlan(square, xy, z, above=command(hover), at=command(z),
-                     z2=z2, at2=command(z2) if z2 is not None else None, z_correction=z_correction)
+                     z2=z2, at2=command(z2) if z2 is not None else None, correction=correction)
 
 
 def remove_parallax(low_xy: np.ndarray, high_xy: np.ndarray, z_low: float, z_high: float) -> np.ndarray:
@@ -131,10 +134,10 @@ class ProbeReport:
 
     square: str
     joint_error_deg: dict[str, float]  # reached - commanded, per arm joint
-    model_mm: tuple[float, float]  # (reach, side) of the model fingertip from the target
-    model_z_mm: float  # model fingertip height minus the target height
+    model_mm: tuple[float, float]  # (reach, side) of the model fingertip from the COMMANDED target
+    model_z_mm: float  # model fingertip height minus the commanded height
     camera_mm: tuple[float, float] | None  # (reach, side) of the seen fingertip from the target
-    geometry_mm: tuple[float, float] | None  # camera minus model: what the joints do not explain
+    geometry_mm: tuple[float, float] | None  # camera minus model: what joints + corrections miss
     parallax_mm: tuple[float, float] | None = None  # apparent shift per 10 mm of height, if measured
     height_error_mm: float | None = None  # ruler gap minus commanded height (- = tip lower than told)
 
@@ -196,6 +199,12 @@ def analyze(
     tip = kinematics.forward(to_model(reached))
     model_xy = placement.arm_to_board(tip[:2])
     reach_dir = unit(plan.target_xy - placement.base_xy)
+    # Where the commands aimed (the square plus the configured correction): the model tip is
+    # graded against this, the camera against the square itself.
+    target_arm = np.append(placement.board_to_arm(plan.target_xy), plan.target_z)
+    commanded = plan.correction.apply(target_arm)
+    commanded_xy = placement.arm_to_board(commanded[:2])
+    model_mm = split_mm(model_xy - commanded_xy, reach_dir)
     camera_mm = geometry_mm = parallax_mm = None
     if camera_xy is not None:
         seen = np.asarray(camera_xy)
@@ -204,17 +213,75 @@ def analyze(
             per_10mm = (np.asarray(camera_xy2) - np.asarray(camera_xy)) * 0.010 / (plan.z2 - plan.target_z)
             parallax_mm = split_mm(per_10mm, reach_dir)
         camera_mm = split_mm(seen - plan.target_xy, reach_dir)
-        geometry_mm = split_mm(seen - model_xy, reach_dir)
+        geometry_mm = (camera_mm[0] - model_mm[0], camera_mm[1] - model_mm[1])
     return ProbeReport(
         square=plan.square,
         joint_error_deg=errors,
-        model_mm=split_mm(model_xy - plan.target_xy, reach_dir),
-        model_z_mm=1000 * (tip[2] - plan.target_z - plan.z_correction),
+        model_mm=model_mm,
+        model_z_mm=1000 * (tip[2] - commanded[2]),
         camera_mm=camera_mm,
         geometry_mm=geometry_mm,
         parallax_mm=parallax_mm,
         height_error_mm=None if measured_gap_mm is None else measured_gap_mm - 1000 * plan.target_z,
     )
+
+
+@dataclass(frozen=True)
+class ProbeSample:
+    """One probed hold for :func:`fit_geometry`: where the model put the tip (arm frame, from the
+    joints read back) and where the camera saw it on the board (parallax removed), both in m."""
+
+    square: str
+    model_tip_xy: np.ndarray
+    seen_xy: np.ndarray
+
+
+@dataclass(frozen=True)
+class GeometryFit:
+    """The arm geometry that best explains a set of probes."""
+
+    edge_gap: float  # base yaw axis -> near board edge, m
+    correction: ArmCorrection  # reach / side landing error (z is left to the ruler)
+    rms_mm: float
+    residuals_mm: list[tuple[float, float]]  # per sample, in order: (reach, side) the fit still misses
+
+
+def predict_seen(sample: ProbeSample, arm_id: str, square_size: float, edge_gap: float,
+                 correction: ArmCorrection) -> np.ndarray:
+    """Where the tip would really be (board frame) if the base sits ``edge_gap`` off the board and
+    the arm lands ``correction`` short / to its right of its model."""
+    placement = arm_placements(square_size, edge_gap)[arm_id]
+    return placement.arm_to_board(correction.undo(np.append(sample.model_tip_xy, 0.0))[:2])
+
+
+def fit_geometry(samples: list[ProbeSample], arm_id: str, square_size: float,
+                 start_gap: float) -> GeometryFit:
+    """Least-squares edge_gap + reach + side corrections from camera probes.
+
+    The base gap and the reach shortfall look alike on the arm's centre line but not off it: a gap
+    error rotates the line to every square (sideways misses that grow away from the centre line),
+    a reach shortfall does not. So the probes must spread sideways (3+ squares across ranks)."""
+    if len(samples) < 3 or len({chess.square_rank(chess.parse_square(s.square)) for s in samples}) < 2:
+        raise ValueError("need 3+ probed squares on 2+ ranks to separate the base gap from the reach")
+    params = np.array([start_gap, 0.0, 0.0])
+
+    def residuals(p: np.ndarray) -> np.ndarray:
+        c = ArmCorrection(reach=p[1], side=p[2])
+        return np.concatenate([predict_seen(s, arm_id, square_size, p[0], c) - s.seen_xy for s in samples])
+
+    for _ in range(20):  # Gauss-Newton; the problem is nearly linear, so this converges in a few steps
+        res = residuals(params)
+        jac = np.column_stack([(residuals(params + d) - res) / 1e-6 for d in np.eye(3) * 1e-6])
+        step = np.linalg.lstsq(jac, -res, rcond=None)[0]
+        params = params + step
+        if np.max(np.abs(step)) < 1e-7:
+            break
+    correction = ArmCorrection(reach=float(params[1]), side=float(params[2]))
+    placement = arm_placements(square_size, float(params[0]))[arm_id]
+    per_sample = [split_mm(s.seen_xy - predict_seen(s, arm_id, square_size, params[0], correction),
+                           unit(s.seen_xy - placement.base_xy)) for s in samples]
+    rms = 1000 * float(np.sqrt(np.mean(residuals(params) ** 2) * 2))  # per-point planar rms
+    return GeometryFit(float(params[0]), correction, rms, per_sample)
 
 
 def verdict(reports: list[ProbeReport]) -> list[str]:
