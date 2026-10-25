@@ -91,7 +91,14 @@ GRIPPER_PHASES = (Phase.GRIP, Phase.RELEASE)
 # than faulting), and it pauses after the gripper closes / opens so the piece is held / let go.
 UP_PHASES = (Phase.LIFT, Phase.RETRACT)
 REAR_MARGIN = math.radians(10.0)  # rearing the elbow off the pad stops this short of its limit
-REAR_LEAN = math.radians(45.0)  # ...while the shoulder leans back this much, in the same motion
+REAR_LEAN = math.radians(85.0)  # ...while the shoulder leans back this much, in the same motion
+# (45 left follower_1 near enough that follower_2 hit it on the handoff, 2026-10-25; 85 parks the
+# shoulder ~-48 deg, inside the ~-61 the real shoulder was seen to reach)
+# Before handing over, a finished arm must have STOPPED moving (a lagging shoulder kept swinging
+# while the other arm reached in): read-backs this close for STILL_FOR, at most STILL_TIMEOUT.
+STILL_TOLERANCE = math.radians(0.5)
+STILL_FOR = 0.15  # s
+STILL_TIMEOUT = 3.0  # s
 GRIPPER_DWELL = 0.1  # s (0.3 looked stalled, operator 2026-10-25)
 DWELL = "dwell"
 
@@ -516,6 +523,8 @@ class Executor:
                             self._arrive(arm, command, gates[i], strict=gates[i] not in
                                          {ph.value for ph in UP_PHASES})
                         deadline = time.monotonic()
+                if self.live:
+                    self._wait_still(arm)  # stopped, before any other arm moves near it
                 self._verify(arm, traj.samples[-1])
         except Exception as exc:
             self._hold_all()
@@ -538,6 +547,19 @@ class Executor:
                 raise ExecutionFault(f"{arm.arm_id} did not reach the pose before {phase} "
                                      f"(off by deg: {off}); the gripper was NOT moved")
             time.sleep(0.05)
+
+    def _wait_still(self, arm: Arm) -> None:
+        """Wait until ``arm``'s joints stop changing (or STILL_TIMEOUT): a slow joint catching up."""
+        give_up = time.monotonic() + STILL_TIMEOUT
+        last, since = arm.read_joints(), time.monotonic()
+        while time.monotonic() < give_up:
+            time.sleep(0.05)
+            now = arm.read_joints()
+            if any(abs(now[n] - last[n]) > STILL_TOLERANCE for n in now if n != "gripper"):
+                last, since = now, time.monotonic()
+            elif time.monotonic() - since >= STILL_FOR:
+                return
+        log.warning("%s still moving after %.0f s; going on", arm.arm_id, STILL_TIMEOUT)
 
     def _verify(self, arm: Arm, target: dict[str, float]) -> None:
         """Where the arm ended vs its last command. Only reported: the move is done by then and the

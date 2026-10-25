@@ -444,4 +444,7 @@ def test_off_the_pad_the_arm_rears_and_leans_back_in_one_motion_and_stays_up(con
     assert abs(end["shoulder_lift"] - released["shoulder_lift"]) > REAR_LEAN * 0.8  # leaned back...
     assert end["wrist_flex"] == pytest.approx(released["wrist_flex"])  # ...wrist held, in one go
     pts = SO101Kinematics().link_points(urdf_to_model(end))
-    assert min(p[2] for p in pts[2:]) > 0.30  # the whole gripper ends > 30 cm up
+    assert min(p[2] for p in pts[2:]) > 0.20  # the whole gripper ends > 20 cm up...
+    placement = arm_placements(config.board.square_size, config.arms.edge_gap)["follower_1"]
+    edge = 8 * config.board.square_size  # ...and back past follower_1's own board edge (h side)
+    assert all(placement.arm_to_board(p[:2])[0] > edge for p in pts[2:])
