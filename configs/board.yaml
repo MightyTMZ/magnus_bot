@@ -63,7 +63,7 @@ grasp_height:
 gripper_closed_pct:
   pawn: 3.10     # MEASURED 2026-10-25 (follower_1, by hand on the stem, gripper_read.py)
   knight: 9.25   # MEASURED 2026-10-25
-  bishop: 6.0    # MEASURED 2026-10-25
+  bishop: 4.5    # 6.0 by hand 2026-10-25; live: dropped in transit 4x (lost) -> closed 1.5 more
   rook: 4.15     # MEASURED 2026-10-24 (follower_1, firm hold on the rook stem)
-  queen: 9.0     # MEASURED 2026-10-25
+  queen: 7.5     # 9.0 by hand 2026-10-25; live: dropped once (lost) -> closed 1.5 more
   king: 10.00    # MEASURED 2026-10-25
