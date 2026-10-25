@@ -40,7 +40,7 @@ import chess
 from magnus_bot.config import TunedGrasp, load_config, save_tuned_grasp
 from magnus_bot.geometry.frames import arm_placements
 from magnus_bot.hardware.sim_arm import SimArm
-from magnus_bot.kinematics.conventions import load_servo_map
+from magnus_bot.kinematics.conventions import load_servo_map, real_urdf_limits
 from magnus_bot.kinematics.reach import compute_reachability
 from magnus_bot.kinematics.so101_ik import SO101Kinematics, Unreachable
 from magnus_bot.orchestration.bench import board_diagram, shut_down
@@ -210,14 +210,23 @@ def main(argv: list[str] | None = None, prompt=input) -> int:
     stamp = time.strftime("%Y%m%d-%H%M%S") + ("" if args.live else "_sim")
     log_path = args.log or ROOT / "hardware" / "tuning_logs" / f"{args.uci}_{stamp}.jsonl"
 
+    # Plan inside what the servos can really reach (their calibrated ranges), live and in sim alike.
+    spec = config.arms.arms[args.arm]
+    servo_map = ROOT / "hardware" / "servo_maps" / f"{args.arm}.json"
+    smap = load_servo_map(servo_map) if servo_map.is_file() else None
+    real_limits = None if smap is None else real_urdf_limits(smap, kin.model.limits, spec.calibration_id)
+    urdf_limits = real_limits or kin.model.limits
+    print(f"joint limits: {'calibrated servo ranges' if real_limits else 'URDF (no calibration found)'}")
+
     world: SimulatedBoard | None = None
     reader: BoardReader
     if args.live:
-        servo_map = ROOT / "hardware" / "servo_maps" / f"{args.arm}.json"
         try:
             config.require_measured()  # also enforced by Executor; fail before touching hardware
-            smap = load_servo_map(servo_map)
-        except (RuntimeError, OSError) as e:
+            if smap is None or real_limits is None:
+                raise RuntimeError(f"{args.arm} needs {servo_map} and its LeRobot calibration "
+                                   f"({spec.calibration_id}.json) to know its real joint ranges")
+        except RuntimeError as e:
             print(f"live refused: {e}", file=sys.stderr)
             return 1
         reader = HttpBoardReader(args.vision_url)
@@ -248,15 +257,14 @@ def main(argv: list[str] | None = None, prompt=input) -> int:
 
         from magnus_bot.hardware.lerobot_arm import LeRobotArm
 
-        spec = config.arms.arms[args.arm]
         arms = {args.arm: LeRobotArm(arm_id=args.arm, port=spec.port, calibration_id=spec.calibration_id)}
         exec_kwargs = dict(live=True, to_command=smap.model_to_servo,
-                           limits=smap.servo_limits(kin.model.limits), kinematics=kin)
+                           limits=smap.servo_limits(urdf_limits), kinematics=kin)
     else:
         arms = {a: SimArm(a) for a in config.arms.arms}
         world = SimulatedBoard({home: "W"}, miss_rate=args.sim_miss_rate)
         reader = world
-        exec_kwargs = dict(simulate=True, kinematics=kin)
+        exec_kwargs = dict(simulate=True, kinematics=kin, limits=urdf_limits)  # sim commands URDF angles
 
     def make_shuttle(setting: Setting) -> ArmShuttle:
         pitch = math.radians(setting.pitch_deg)
@@ -271,8 +279,8 @@ def main(argv: list[str] | None = None, prompt=input) -> int:
         cfg = dataclasses.replace(config, arms=dataclasses.replace(
             config.arms, z_grasp=z_grasp, z_clear=args.hover))
         rmap = compute_reachability(placements, kin, cfg.arms.z_grasp, cfg.board.square_size,
-                                    z_clear=cfg.arms.z_clear, max_pitch=pitch, grip_depth=grip_depth,
-                                    corrections=cfg.arms.corrections())
+                                    z_clear=cfg.arms.z_clear, limits=urdf_limits, max_pitch=pitch,
+                                    grip_depth=grip_depth, corrections=cfg.arms.corrections())
         for sq in (home, away):
             sq_index = chess.parse_square(sq)
             if not rmap.can_reach(args.arm, chess.square_file(sq_index), chess.square_rank(sq_index)):

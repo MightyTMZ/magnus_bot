@@ -52,9 +52,11 @@ class JointLimit:
 
 
 # Planned arm poses must keep this far inside every arm joint's limit (rad; not the gripper).
-# 2026-10-25 live: a place on h4 planned the elbow within 3 deg of its limit; the real elbow stalled
-# short of it, the arm stayed high and too far out, and the rook dropped onto the g-file.
-PLAN_LIMIT_MARGIN = math.radians(8.0)
+# 2026-10-25 live: a place on h4 asked the elbow for 100 deg; its servo's calibrated range ends at
+# 96.3 deg, so it stalled short, the arm stayed high and too far out, and the rook dropped onto the
+# g-file. Live planning now uses the calibrated ranges (conventions.calibrated_range), which are
+# the servos' own hard stops, so the margin only covers settling slack.
+PLAN_LIMIT_MARGIN = math.radians(2.0)
 
 
 @dataclass(frozen=True)

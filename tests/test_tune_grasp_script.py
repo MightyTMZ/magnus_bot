@@ -131,20 +131,21 @@ def test_live_refuses_an_unmeasured_rig(tune, config_dir, capsys):
     assert "live refused" in capsys.readouterr().err
 
 
-def test_live_stops_before_hardware_when_vision_is_down(tune, config_dir, capsys):
+def test_live_stops_before_hardware_when_vision_is_down(tune, config_dir, capsys, lerobot_calibration):
     argv = ["--live", "--config-dir", str(config_dir(measured=True)), "--vision-url", dead_url()]
     assert tune.main(argv, prompt=no_prompt) == 1
     assert "vision:" in capsys.readouterr().err
 
 
-def test_live_needs_the_piece_on_the_first_square(tune, config_dir, vision_server, capsys):
+def test_live_needs_the_piece_on_the_first_square(tune, config_dir, vision_server, capsys,
+                                                  lerobot_calibration):
     vision_server.reply = (200, {**BOARD_JSON, "occupancy": {"g4": "W"}, "pieces": {}})
     argv = ["--live", "--config-dir", str(config_dir(measured=True)), "--vision-url", vision_server.url]
     assert tune.main(argv, prompt=no_prompt) == 1
     assert "put the rook on g3 and clear g4 first" in capsys.readouterr().err
 
 
-def test_live_needs_a_typed_yes(tune, config_dir, vision_server, capsys):
+def test_live_needs_a_typed_yes(tune, config_dir, vision_server, capsys, lerobot_calibration):
     argv = ["--live", "--config-dir", str(config_dir(measured=True)), "--vision-url", vision_server.url]
     assert tune.main(argv, prompt=lambda message: "no") == 1
     assert "aborted" in capsys.readouterr().out
