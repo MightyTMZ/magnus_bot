@@ -340,6 +340,7 @@ def _arm_waypoints(arm_steps, config, home, placement, kinematics, limits, to_co
         return None
 
     travel = []  # per segment (the one arriving at each waypoint after rest): "travel", "rise" or "near"
+    reared = None  # the elbow-reared pose after a drop-off on the pad, if any
     if (start := via(arm_steps.steps[0].xyz[:2], gripper)) is not None:
         waypoints.append(start)  # out of rest: up and over before reaching across the board
         travel.append("travel")
@@ -387,6 +388,7 @@ def _arm_waypoints(arm_steps, config, home, placement, kinematics, limits, to_co
                 stop = stops["elbow_flex"]
                 edge = min(edge, stop.hi) if up > 0 else max(edge, stop.lo)
             command = {**command, "elbow_flex": edge - up * REAR_MARGIN, "wrist_flex": released["wrist_flex"]}
+            reared = command
         past = {n: math.degrees(max(stops[n].lo - v, v - stops[n].hi)) for n, v in command.items()
                 if stops and n in stops and not stops[n].lo - STOP_SLACK <= v <= stops[n].hi + STOP_SLACK}
         if past:
@@ -398,6 +400,18 @@ def _arm_waypoints(arm_steps, config, home, placement, kinematics, limits, to_co
         if step.phase in UP_PHASES:  # up first: no sideways move before the arm is really up
             checkpoints.append((len(waypoints) - 1, step.phase.value))
     if (end := via(arm_steps.steps[-1].xyz[:2], gripper)) is not None:
+        if reared is not None:
+            # From the reared pose: lean the shoulder back (and turn) with the elbow STILL folded up,
+            # settle, THEN unfold. Together, the quick elbow unfolded before the slow shoulder leaned
+            # back and swung the gripper straight back down onto the pad (2026-10-25).
+            lean = {**reared, "shoulder_pan": end["shoulder_pan"], "shoulder_lift": end["shoulder_lift"]}
+            try:
+                check_limits(lean, limits)
+                waypoints.append(lean)
+                travel.append("travel")
+                checkpoints.append((len(waypoints) - 1, Phase.RETRACT.value))  # settle before unfolding
+            except JointLimitError:
+                pass
         waypoints.append(end)  # after the place: already up; now back toward the arm and STAY up
         travel.append("travel")
         return waypoints, checkpoints, travel
