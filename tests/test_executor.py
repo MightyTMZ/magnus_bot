@@ -448,3 +448,43 @@ def test_off_the_pad_the_arm_rears_and_leans_back_in_one_motion_and_stays_up(con
     placement = arm_placements(config.board.square_size, config.arms.edge_gap)["follower_1"]
     edge = 8 * config.board.square_size  # ...and back past follower_1's own board edge (h side)
     assert all(placement.arm_to_board(p[:2])[0] > edge for p in pts[2:])
+
+
+class _OffsetArm(SimArm):
+    """A SimArm whose read-back is off by ``offsets`` (rad per joint): a joint that did not get there."""
+
+    def __init__(self, arm_id, offsets):
+        super().__init__(arm_id)
+        self.offsets = offsets
+
+    def read_joints(self):
+        joints = super().read_joints()
+        for name, off in self.offsets.items():
+            joints[name] += off
+        return joints
+
+
+def test_the_other_arm_is_not_started_if_the_first_did_not_pull_back_off_the_pad(config_dir):
+    # 2026-10-25: follower_1's shoulder did not lean back after the e3 drop-off; the grippers hit.
+    from magnus_bot.config import TunedGrasp, save_tuned_grasp
+
+    cfg_dir = config_dir(measured=False)
+    save_tuned_grasp(cfg_dir, "bishop", TunedGrasp(pitch_deg=40.0, z_offset_mm=0.0))
+    config = load_config(cfg_dir)
+    config = dataclasses.replace(config, arms=dataclasses.replace(config.arms, z_clear=0.10))
+    stuck = _OffsetArm("follower_1", {})
+    arms = {"follower_1": stuck, "follower_2": SimArm("follower_2")}
+    for a in arms.values():
+        a.connect()
+    executor = Executor(config, arms, _full_reach_map(config), simulate=True, tuned_grasps=True)
+    executor._arrive = lambda *a, **k: None
+    rmap = ReachabilityMap(reachable={"follower_1": {(5, 0)}, "follower_2": {(2, 3)}},
+                           pad_reach={"follower_1", "follower_2"})
+    board = chess.Board("rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2")
+    program = build_move_program(board, chess.Move.from_uci("f1c4"), rmap, config)
+    trajectories = executor.plan(program)
+    stuck.offsets = {"shoulder_lift": 0.5}  # the shoulder ends ~29 deg short of the pull-back
+    with pytest.raises(ExecutionFault, match="did not pull back off the pad.*shoulder_lift commanded"):
+        executor.run(trajectories)
+    assert all(c == arms["follower_2"].command_log[0] for c in arms["follower_2"].command_log)
+    assert len(arms["follower_2"].command_log) <= 1  # only told to hold where it was: it never moved

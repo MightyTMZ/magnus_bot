@@ -102,6 +102,7 @@ REAR_LEAN = math.radians(80.0)
 STILL_TOLERANCE = math.radians(0.5)
 STILL_FOR = 0.15  # s
 STILL_TIMEOUT = 3.0  # s
+CLEAR_TOLERANCE = math.radians(8.0)  # after a pad drop-off: further off than this = not pulled back
 GRIPPER_DWELL = 0.1  # s (0.3 looked stalled, operator 2026-10-25)
 DWELL = "dwell"
 
@@ -530,6 +531,8 @@ class Executor:
                         deadline = time.monotonic()
                 if self.live:
                     self._wait_still(arm)  # stopped, before any other arm moves near it
+                if traj.transfer.dst.kind == PAD:
+                    self._check_cleared(arm, traj.samples[-1])  # never hand over to a blocked pad
                 self._verify(arm, traj.samples[-1])
         except Exception as exc:
             self._hold_all()
@@ -565,6 +568,19 @@ class Executor:
             elif time.monotonic() - since >= STILL_FOR:
                 return
         log.warning("%s still moving after %.0f s; going on", arm.arm_id, STILL_TIMEOUT)
+
+    def _check_cleared(self, arm: Arm, target: dict[str, float]) -> None:
+        """After a drop-off on the pad the arm must really have pulled back before the other arm comes
+        for the piece. 2026-10-25: follower_1's shoulder did not lean back (the plan did) and the
+        grippers collided over e3. If shoulder or elbow is CLEAR_TOLERANCE off, fault: every arm holds
+        and the message gives commanded vs actual angles, to find out why."""
+        actual = arm.read_joints()
+        off = {n: (math.degrees(target[n]), math.degrees(actual[n])) for n in ("shoulder_lift", "elbow_flex")
+               if abs(actual[n] - target[n]) > CLEAR_TOLERANCE}
+        if off:
+            detail = "; ".join(f"{n} commanded {c:.1f} deg, at {a:.1f} deg" for n, (c, a) in off.items())
+            raise ExecutionFault(f"{arm.arm_id} did not pull back off the pad ({detail}); the other arm "
+                                 "was NOT started")
 
     def _verify(self, arm: Arm, target: dict[str, float]) -> None:
         """Where the arm ended vs its last command. Only reported: the move is done by then and the
