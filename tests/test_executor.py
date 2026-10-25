@@ -73,19 +73,14 @@ def _sim(config, **kwargs):
     return arms, Executor(config, arms, _full_reach_map(config), simulate=True, **kwargs)
 
 
-def test_simulate_moves_only_the_assigned_arm_and_parks_it_high():
-    from magnus_bot.orchestration.executor import PARK_REACH
-
+def test_simulate_moves_only_the_assigned_arm_and_returns_to_rest():
     config = _low_clear()
     arms, executor = _sim(config)
+    start = arms["follower_1"].read_joints()
     executor.execute_move(ROOK_H4, H4H5)
     assert arms["follower_1"].command_log
     assert not arms["follower_2"].command_log  # one arm at a time; the other is untouched
-    # It ends parked high above its own board edge, not back down where it started (2026-10-25).
-    tip = config.arms.correction("follower_1").undo(
-        SO101Kinematics().forward(urdf_to_model(arms["follower_1"].read_joints())))
-    assert np.hypot(tip[0], tip[1]) == pytest.approx(PARK_REACH, abs=1e-3)
-    assert tip[2] >= 0.14
+    assert arms["follower_1"].read_joints() == pytest.approx(start)
 
 
 def test_simulated_grip_happens_at_the_source_square():
