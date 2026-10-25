@@ -77,13 +77,19 @@ def plan_joint_trajectory_indexed(
     speed_scale: float,
     hz: float = 30.0,
     max_velocity: Mapping[str, float] | None = None,
+    segment_scales: list[float] | None = None,
 ) -> tuple[list[dict[str, float]], list[int]]:
-    """:func:`plan_joint_trajectory`, plus the sample index at which each waypoint is reached."""
+    """:func:`plan_joint_trajectory`, plus the sample index at which each waypoint is reached.
+
+    ``segment_scales`` (one per segment) multiplies ``speed_scale`` for that segment, e.g. faster
+    long travel moves than the careful moves near the pieces. The product is still clamped to 1."""
     if not joint_waypoints:
         raise ValueError("need at least one waypoint")
     if hz <= 0:
         raise ValueError(f"hz must be > 0, got {hz}")
-    scale = clamp_speed_scale(speed_scale)
+    if segment_scales is not None and len(segment_scales) != len(joint_waypoints) - 1:
+        raise ValueError(f"need {len(joint_waypoints) - 1} segment scales, got {len(segment_scales)}")
+    factors = segment_scales or [1.0] * (len(joint_waypoints) - 1)
     limits = MAX_JOINT_VELOCITY if max_velocity is None else max_velocity
 
     names = list(joint_waypoints[0])
@@ -93,10 +99,10 @@ def plan_joint_trajectory_indexed(
 
     samples = [dict(joint_waypoints[0])]
     indices = [0]
-    for start, end in zip(joint_waypoints, joint_waypoints[1:], strict=False):
+    for start, end, factor in zip(joint_waypoints, joint_waypoints[1:], factors, strict=False):
         if set(end) != set(names):
             raise ValueError(f"waypoint joints {sorted(end)} differ from {sorted(names)}")
-        duration = segment_duration(start, end, limits, scale)
+        duration = segment_duration(start, end, limits, clamp_speed_scale(speed_scale * factor))
         num_steps = max(2, math.ceil(duration * hz) + 1)
         path = min_jerk_interp(
             np.array([start[n] for n in names]), np.array([end[n] for n in names]), num_steps

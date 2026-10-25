@@ -3,7 +3,11 @@
 import numpy as np
 import pytest
 
-from magnus_bot.motion.trajectory import plan_joint_trajectory, segment_duration
+from magnus_bot.motion.trajectory import (
+    plan_joint_trajectory,
+    plan_joint_trajectory_indexed,
+    segment_duration,
+)
 
 HZ = 30.0
 VMAX = {"a": 1.0, "b": 2.0}
@@ -65,3 +69,14 @@ def test_rejects_mismatched_joints_and_missing_limits():
         plan_joint_trajectory([{"a": 0.0}, {"b": 1.0}], speed_scale=1.0, max_velocity=VMAX)
     with pytest.raises(ValueError):
         plan_joint_trajectory([{"c": 0.0}, {"c": 1.0}], speed_scale=1.0, max_velocity=VMAX)
+
+
+def test_a_faster_segment_takes_proportionally_less_time():
+    a = {"shoulder_pan": 0.0, "gripper": 0.0}
+    b = {"shoulder_pan": 1.0, "gripper": 0.0}
+    _, plain = plan_joint_trajectory_indexed([a, b, a], 0.3, 30.0)
+    _, quick = plan_joint_trajectory_indexed([a, b, a], 0.3, 30.0, segment_scales=[1.25, 1.0])
+    assert (quick[1] - quick[0]) == pytest.approx((plain[1] - plain[0]) / 1.25, abs=1)  # first: 25% faster
+    assert (quick[2] - quick[1]) == plain[2] - plain[1]  # second: unchanged
+    with pytest.raises(ValueError, match="segment scales"):
+        plan_joint_trajectory_indexed([a, b, a], 0.3, 30.0, segment_scales=[1.0])

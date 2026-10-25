@@ -181,6 +181,8 @@ GRASP_HEIGHT_PHASES = {  # steps that sit at the piece's grasp height, per end o
     "src": (Phase.DESCEND_PICK, Phase.GRIP),
     "dst": (Phase.DESCEND_PLACE, Phase.RELEASE),
 }
+# Segments arriving at these steps are long travel moves at travel height (the faster ones).
+TRAVEL_PHASES = (Phase.HOVER, Phase.TRAVERSE)
 SQUARE_PHASES = {  # every step over each end of the transfer (a square nudge moves all of them)
     "src": (Phase.HOVER, Phase.DESCEND_PICK, Phase.GRIP, Phase.LIFT),
     "dst": (Phase.TRAVERSE, Phase.DESCEND_PLACE, Phase.RELEASE, Phase.RETRACT),
@@ -238,7 +240,7 @@ def plan_joint_program(
         first_error: Exception | None = None
         for choice in choices:
             try:
-                waypoints, checkpoints = _arm_waypoints(
+                waypoints, checkpoints, travel = _arm_waypoints(
                     arm_steps, config, home, placements[arm_steps.arm_id], kinematics, limits, to_command,
                     choice, piece, arm_stops)
                 break
@@ -246,7 +248,9 @@ def plan_joint_program(
                 first_error = first_error or exc
         else:
             raise first_error  # type: ignore[misc]
-        samples, at = plan_joint_trajectory_indexed(waypoints, config.arms.speed_scale, hz)
+        fast = config.arms.travel_speedup
+        samples, at = plan_joint_trajectory_indexed(waypoints, config.arms.speed_scale, hz,
+                                                    segment_scales=[fast if t else 1.0 for t in travel])
         trajectories.append(ArmTrajectory(arm_steps.arm_id, arm_steps.transfer, samples,
                                           tuple((at[i], phase) for i, phase in checkpoints), choice.label))
     return trajectories
@@ -308,8 +312,10 @@ def _arm_waypoints(arm_steps, config, home, placement, kinematics, limits, to_co
                 return cmd
         return None
 
+    travel = []  # per segment (the one arriving at each waypoint after rest): a long travel move?
     if (start := via(arm_steps.steps[0].xyz[:2], gripper)) is not None:
         waypoints.append(start)  # out of rest: up and over before reaching across the board
+        travel.append(True)
     for step in arm_steps.steps:
         if step.phase in GRIPPER_PHASES:
             checkpoints.append((len(waypoints) - 1, step.phase.value))
@@ -346,10 +352,13 @@ def _arm_waypoints(arm_steps, config, home, placement, kinematics, limits, to_co
             detail = ", ".join(f"{n} {d:.1f} deg" for n, d in past.items())
             raise BeyondServoStop(f"{where}: past the servo stop by {detail} [{choice.label}]")
         waypoints.append(command)
+        travel.append(step.phase in TRAVEL_PHASES)
     if (end := via(arm_steps.steps[-1].xyz[:2], gripper)) is not None:
         waypoints.append(end)  # after the place: already up; now back toward the arm, still high
+        travel.append(True)
     waypoints.append(home)  # back to rest: clears the board (and the pad) for the other arm
-    return waypoints, checkpoints
+    travel.append(True)
+    return waypoints, checkpoints, travel
 
 
 class Executor:

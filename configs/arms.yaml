@@ -51,6 +51,10 @@ grasp_side_offset:
 
 # Default trajectory speed scale (0..1). Conservative by default.
 speed_scale: 0.3
+# Long travel moves (rest <-> above the board, square to square at travel height) run this much
+# faster; the moves near the pieces (descend, grip, release, lift) stay at speed_scale. 2026-10-25:
+# operator asked +25%. Peak joint speed then ~32 deg/s, well under the 120 deg/s per-command clamp.
+travel_speedup: 1.25
 
 # Traverse height for the hover/traverse phases. MUST exceed the tallest piece + margin, AND
 # account for the piece hanging below the grasp point. Set 2026-10-24: king 9.9cm + ~1cm
