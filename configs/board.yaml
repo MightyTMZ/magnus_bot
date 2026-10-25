@@ -62,7 +62,7 @@ grasp_height:
 # scripts/gripper_read.py (close on that piece's stem). Fill the nulls to help flip measured:true.
 gripper_closed_pct:
   pawn: 1.7      # 3.10 by hand 2026-10-25; live: needs a very tight hold, 1.7 holds (operator)
-  knight: 5.2    # 9.25 by hand 2026-10-25; operator: 30% tighter (6.5), then 20% more
+  knight: 2.0    # 9.25 by hand 2026-10-25; tightened step by step; operator set 2.0
   bishop: 4.5    # 6.0 by hand 2026-10-25; live: dropped in transit 4x (lost) -> closed 1.5 more
   rook: 4.15     # MEASURED 2026-10-24 (follower_1, firm hold on the rook stem)
   queen: 7.5     # 9.0 by hand 2026-10-25; live: dropped once (lost) -> closed 1.5 more
