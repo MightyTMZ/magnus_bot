@@ -12,14 +12,14 @@ bishop:
   tuned_on: follower_1 g4g5 2026-10-25
   z_offset_mm: 0.0
 knight:
-  confirmed: pitch 55 set by the operator after checking by hand; z +6 = middle of
-    the tried 0..+12 (unconfirmed); hold 5.2%
+  confirmed: 'pitch 55 set by the operator; z lowered +6 -> +2 after Nf3 missed (operator:
+    grab lower); unconfirmed; hold 5.2%'
   date: '2026-10-25'
   grip_depth_mm: null
   pitch_deg: 55.0
   side_offset_mm: 0.0
-  tuned_on: follower_1 g4g5 2026-10-25
-  z_offset_mm: 6.0
+  tuned_on: follower_1 g4g5 / g1f3 2026-10-25
+  z_offset_mm: 2.0
 pawn:
   confirmed: 'live at 45 deg: 5/5 across z -6..+3 (50 deg/-6: 0/1); saved mid-range;
     hold 1.7%'
