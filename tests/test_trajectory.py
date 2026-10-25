@@ -80,3 +80,17 @@ def test_a_faster_segment_takes_proportionally_less_time():
     assert (quick[2] - quick[1]) == plain[2] - plain[1]  # second: unchanged
     with pytest.raises(ValueError, match="segment scales"):
         plan_joint_trajectory_indexed([a, b, a], 0.3, 30.0, segment_scales=[1.0])
+
+
+def test_pass_through_waypoints_are_flowed_through_without_stopping():
+    a = {"shoulder_pan": 0.0, "gripper": 0.0}
+    b = {"shoulder_pan": 0.5, "gripper": 0.0}
+    c = {"shoulder_pan": 1.0, "gripper": 0.0}
+    stop, at_stop = plan_joint_trajectory_indexed([a, b, c], 0.3, 30.0)
+    flow, at_flow = plan_joint_trajectory_indexed([a, b, c], 0.3, 30.0, pass_through={1})
+    assert flow[-1]["shoulder_pan"] == pytest.approx(1.0) and len(at_flow) == 3
+    # stopping at b means zero speed there; flowing through, it is still moving fast at b
+    moving = abs(flow[at_flow[1] + 1]["shoulder_pan"] - flow[at_flow[1]]["shoulder_pan"])
+    still = abs(stop[at_stop[1] + 1]["shoulder_pan"] - stop[at_stop[1]]["shoulder_pan"])
+    assert moving > 10 * still
+    assert abs(len(flow) - len(stop)) <= 2  # same total time, it just does not stop at b

@@ -421,11 +421,12 @@ def test_a_lift_that_settles_a_little_off_does_not_stop_the_move(monkeypatch):
     assert ("lift", False) in calls and ("retract", False) in calls
 
 
-def test_off_the_pad_the_arm_rears_and_leans_back_in_one_motion_and_stays_up(config_dir):
-    # 2026-10-25: a rear, then a separate lean-and-unfold, let the quick elbow swing the gripper back
-    # down onto the bishop on e3. Now one motion (elbow up + shoulder back), ending high off the board.
+def test_off_the_pad_the_arm_lifts_then_pulls_straight_back_toward_its_base(config_dir):
+    # 2026-10-25: leaning the shoulder back with the elbow raised did not move the real shoulder, and
+    # a joint-space return dropped the gripper onto the bishop on e3. Now: up, then a straight line
+    # back at that height, ending near the arm's own base.
     from magnus_bot.config import TunedGrasp, save_tuned_grasp
-    from magnus_bot.orchestration.executor import REAR_LEAN
+    from magnus_bot.orchestration.executor import PAD_LIFT_Z, PULLBACK_TO
 
     cfg_dir = config_dir(measured=False)
     save_tuned_grasp(cfg_dir, "bishop", TunedGrasp(pitch_deg=40.0, z_offset_mm=0.0))
@@ -439,15 +440,14 @@ def test_off_the_pad_the_arm_rears_and_leans_back_in_one_motion_and_stays_up(con
     to_pad = build_move_program(board, chess.Move.from_uci("f1c4"), rmap, config)[0]
     traj = executor.plan([to_pad])[0]
     gates = {phase: i for i, phase in traj.checkpoints if phase != "dwell"}
-    assert gates["retract"] == len(traj.samples) - 1  # the reared pose is where the move ends
-    released, end = traj.samples[gates["release"]], traj.samples[-1]
-    assert abs(end["shoulder_lift"] - released["shoulder_lift"]) > REAR_LEAN * 0.8  # leaned back...
-    assert end["wrist_flex"] == pytest.approx(released["wrist_flex"])  # ...wrist held, in one go
-    pts = SO101Kinematics().link_points(urdf_to_model(end))
-    assert min(p[2] for p in pts[2:]) > 0.20  # the whole gripper ends > 20 cm up...
-    placement = arm_placements(config.board.square_size, config.arms.edge_gap)["follower_1"]
-    edge = 8 * config.board.square_size  # ...and back past follower_1's own board edge (h side)
-    assert all(placement.arm_to_board(p[:2])[0] > edge for p in pts[2:])
+    fix, kin = config.arms.correction("follower_1"), SO101Kinematics()
+    tips = [fix.undo(kin.forward(urdf_to_model(s))) for s in traj.samples[gates["retract"]:]]
+    assert tips[0][2] >= PAD_LIFT_Z  # lifted to ~13 cm first (the tilted tip sits a little higher)...
+    assert all(abs(t[2] - tips[0][2]) < 0.005 for t in tips)  # ...then straight back at that height...
+    radii = [np.hypot(t[0], t[1]) for t in tips]
+    assert all(b <= a + 1e-4 for a, b in zip(radii, radii[1:], strict=False))  # ...only ever toward the base
+    assert radii[0] - radii[-1] > 0.10  # ...at least 10 cm back...
+    assert radii[-1] < PULLBACK_TO + 0.035  # ...ending near the base (the tilted tip ~15 mm further out)
 
 
 class _OffsetArm(SimArm):
