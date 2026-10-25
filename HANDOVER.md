@@ -189,6 +189,13 @@ base 0.078 + the arm falling 33 mm short (`arms.reach_correction`) + 2 mm right 
   (H 50-75, S >= 110, V >= 100) via the new /raw.jpg; it now tracks the darker paint, not the very
   tip (no more tip calibration planned, so left).
 
+- **Scholar's mate demo, saved:** `play_moves.py --live --game scholars-mate` (both arms). The
+  camera watches for each of Black's moves (seen twice in a row, so a hand over the board does not
+  count; 300 s timeout) and the arms reply at once. Live pieces done: e4 (pawn 45), Bc4 via the
+  e3 pad (bishop on follower_2 confirmed e3<->c4), Qh5 via e3 (queen h5 override: aim 6 mm to the
+  arm's left), Qxf7 (f7 pawn to the bin fine). New `arms.square_nudge_mm` (per arm, per square
+  [reach, side] mm at that square only): follower_1 f7 [4, -4] (the queen landed short-left).
+
 ## Earlier session (2026-10-24, Alex + Claude, part 2) — reach probe, geometry calibrated
 - **Why:** after the live tuning run missed every time, the camera could only say "not picked".
   Measuring WHERE the arm goes split the miss into motors vs geometry.

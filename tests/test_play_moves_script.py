@@ -71,3 +71,62 @@ def test_live_refuses_a_move_that_needs_an_arm_not_allowed(play, config_dir, cap
     argv = ["--live", "--moves", "e2e4,f1c4", "--config-dir", str(cfg)]  # Bc4 is a handoff
     assert play.main(argv, prompt=lambda m: "no") == 1
     assert "needs follower_1, follower_2; --arms allows only follower_1" in capsys.readouterr().err
+
+
+def test_the_saved_scholars_mate_plans_with_both_arms(play, config_dir, capsys):
+    cfg = config_dir(measured=False)
+    for piece, pitch in (("pawn", 45.0), ("bishop", 40.0), ("queen", 45.0)):
+        save_tuned_grasp(cfg, piece, TunedGrasp(pitch_deg=pitch, z_offset_mm=0.0))
+    assert play.main(["--game", "scholars-mate", "--config-dir", str(cfg)]) == 0
+    assert "SIM OK h5f7 (Qxf7#)" in capsys.readouterr().out
+
+
+class _Board:
+    """A vision reader that shows a sequence of boards: what the camera sees over time."""
+
+    def __init__(self, frames):
+        self.frames = list(frames)
+
+    def read(self, fresh=True, timeout=8.0, near=None):
+        from magnus_bot.vision.observation import BoardObservation
+
+        return BoardObservation(occupancy=self.frames.pop(0) if len(self.frames) > 1 else self.frames[0])
+
+
+def test_the_humans_move_is_taken_once_the_camera_sees_it_twice(play, monkeypatch):
+    import types
+
+    import chess
+
+    from magnus_bot.vision.verify import expected_occupancy
+
+    monkeypatch.setattr(play, "HUMAN_POLL", 0.0)
+    board = chess.Board()
+    board.push_uci("e2e4")
+    move = chess.Move.from_uci("e7e5")
+    before = expected_occupancy(board)
+    after = board.copy()
+    after.push(move)
+    done = expected_occupancy(after)
+    hand = {k: v for k, v in before.items() if k != "e7"}  # pawn lifted, not set down yet
+    reader = _Board([before, hand, done, done])
+    args = types.SimpleNamespace(human_timeout=5.0, vision_timeout=1.0)
+    check = play.wait_for_human(reader, board, move, "e5", args)
+    assert check is not None and check.outcome.value == "success"
+    assert reader.frames == [done]  # it waited for the second matching look
+
+
+def test_waiting_for_the_human_gives_up_after_the_timeout(play, monkeypatch):
+    import types
+
+    import chess
+
+    from magnus_bot.vision.verify import expected_occupancy
+
+    monkeypatch.setattr(play, "HUMAN_POLL", 0.0)
+    board = chess.Board()
+    board.push_uci("e2e4")
+    reader = _Board([expected_occupancy(board)])  # nobody moves
+    args = types.SimpleNamespace(human_timeout=0.05, vision_timeout=1.0)
+    check = play.wait_for_human(reader, board, chess.Move.from_uci("e7e5"), "e5", args)
+    assert check is not None and check.outcome.value != "success"

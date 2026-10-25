@@ -10,6 +10,10 @@ hold (board.yaml gripper_closed_pct).
 
   sim:   <core-venv>/python scripts/play_moves.py --moves e2e4,e7e5,f1c4,b8c6,d1h5,g8f6,h5f7
   live:  <lerobot-venv>/python scripts/play_moves.py --live --arms follower_1,follower_2 --moves ...
+  demo:  <lerobot-venv>/python scripts/play_moves.py --live --game scholars-mate
+
+Saved games (--game, both arms by default): the camera watches for each of the human's moves and
+the arms reply as soon as it sees one (no key presses). See GAMES.
 
 Handoffs (neither arm reaches both squares) go through the pad, a board square both arms reach
 (configs/handoff.yaml: e3): arm A sets the piece down there, arm B picks it up. Captures first
@@ -64,7 +68,11 @@ from magnus_bot.vision.verify import (
 ROOT = Path(__file__).resolve().parents[1]
 HOVER = 0.10  # lift / travel height (m), as tune_grasp.py
 DEFAULT_LIVE_ARMS = "follower_1"
-HUMAN_TRIES = 3  # how often to re-check the board after asking for the human's move
+HUMAN_TIMEOUT = 300.0  # s to wait for the camera to see the human's move
+HUMAN_POLL = 1.0  # s between looks at the board while waiting
+GAMES = {  # name -> the whole game (both sides), UCI
+    "scholars-mate": "e2e4,e7e5,f1c4,b8c6,d1h5,g8f6,h5f7",  # 1.e4 e5 2.Bc4 Nc6 3.Qh5 Nf6 4.Qxf7#
+}
 
 
 @dataclasses.dataclass(frozen=True)
@@ -121,14 +129,36 @@ def grade(before: chess.Board, move: chess.Move, observed, also: set[str] = froz
     return check_transfer(restrict(was, zone), restrict(want, zone), restrict(observed, zone))
 
 
+def wait_for_human(reader, board: chess.Board, move: chess.Move, san: str, args):
+    """Watch the board until the camera sees ``move`` played (twice in a row, so a hand still over
+    the board does not count), or the timeout passes. The last check, or None if never read."""
+    print(f"YOUR MOVE: play {move.uci()} ({san}) on the board; the arms go as soon as the camera sees it")
+    deadline = time.monotonic() + args.human_timeout
+    check, seen = None, 0
+    while time.monotonic() < deadline:
+        try:
+            check = grade(board, move, reader.read(fresh=True, timeout=args.vision_timeout).occupancy)
+        except VisionUnavailable:  # no stable board yet (a hand over it): keep watching
+            check = None
+        seen = seen + 1 if check is not None and check.outcome is Outcome.SUCCESS else 0
+        if seen >= 2:
+            return check
+        time.sleep(HUMAN_POLL)
+    return check
+
+
 def main(argv: list[str] | None = None, prompt=input) -> int:
     parser = argparse.ArgumentParser(description="Play real chess moves with the tuned grasps.")
-    parser.add_argument("--moves", required=True,
-                        help="comma-separated UCI, the whole game or the robots' moves only")
+    which = parser.add_mutually_exclusive_group(required=True)
+    which.add_argument("--moves", help="comma-separated UCI, the whole game or the robots' moves only")
+    which.add_argument("--game", choices=sorted(GAMES), help="a saved game, e.g. scholars-mate")
     parser.add_argument("--fen", default=chess.STARTING_FEN, help="the real board before the first move")
     parser.add_argument("--live", action="store_true", help="drive the real arms (gated)")
-    parser.add_argument("--arms", default=DEFAULT_LIVE_ARMS,
-                        help="arms allowed to move live, comma-separated (e.g. follower_1,follower_2)")
+    parser.add_argument("--arms", default=None,
+                        help="arms allowed to move live, comma-separated (default: follower_1; both "
+                             "arms with --game)")
+    parser.add_argument("--human-timeout", type=float, default=HUMAN_TIMEOUT,
+                        help="seconds to wait for the camera to see each of the human's moves")
     parser.add_argument("--vision-url", default=DEFAULT_VISION_URL)
     parser.add_argument("--vision-timeout", type=float, default=10.0)
     parser.add_argument("--log", type=Path, default=None)
@@ -139,14 +169,15 @@ def main(argv: list[str] | None = None, prompt=input) -> int:
     config = load_config(args.config_dir)
     robot = chess.WHITE if config.board.robot_color == "white" else chess.BLACK
     try:
-        turns = parse_game(board, args.moves, robot)
+        turns = parse_game(board, GAMES[args.game] if args.game else args.moves, robot)
     except ValueError as e:
         parser.error(str(e))
     config = dataclasses.replace(config, arms=dataclasses.replace(config.arms, z_clear=HOVER))
     kin = SO101Kinematics()
     rmap = reach_map(config, kin)
     pad = pad_square(config)
-    live_arms = {a.strip() for a in args.arms.split(",") if a.strip()}
+    arms_text = args.arms or (",".join(config.arms.arms) if args.game else DEFAULT_LIVE_ARMS)
+    live_arms = {a.strip() for a in arms_text.split(",") if a.strip()}
     if live_arms - set(config.arms.arms):
         parser.error(f"--arms: unknown {sorted(live_arms - set(config.arms.arms))}")
     # Per arm: servo map, and the servos' physical stops (LeRobot calibration) to choose grasps
@@ -259,21 +290,13 @@ def main(argv: list[str] | None = None, prompt=input) -> int:
                 san = board.san(turn.move)
                 started = time.time()
                 if not turn.robot:
-                    check = None
-                    for _ in range(HUMAN_TRIES):
-                        answer = prompt(f"YOUR MOVE: play {turn.move.uci()} ({san}) on the board, then press "
-                                        "Enter (q to stop): ").strip().lower()
-                        if answer == "q":
-                            break
-                        check = grade(board, turn.move, reader.read(fresh=True, timeout=args.vision_timeout)
-                                      .occupancy)
-                        if check.outcome is Outcome.SUCCESS:
-                            break
-                        print(f"  the camera does not see it yet: {check.describe()}")
+                    check = wait_for_human(reader, board, turn.move, san, args)
                     log({"event": "human", "time": started, "uci": turn.move.uci(), "san": san,
-                         "outcome": None if check is None else check.outcome.value})
+                         "outcome": None if check is None else check.outcome.value,
+                         "waited_s": round(time.time() - started, 1)})
                     if check is None or check.outcome is not Outcome.SUCCESS:
-                        print("stopped: the human move was not confirmed", file=sys.stderr)
+                        print(f"stopped: the camera did not see {turn.move.uci()} within "
+                              f"{args.human_timeout:g} s", file=sys.stderr)
                         code = 2
                         break
                     print(f"{turn.move.uci()} ({san}): seen on the board")
