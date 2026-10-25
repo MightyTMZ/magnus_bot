@@ -10,7 +10,7 @@ travels at 10 cm, and closes the gripper to the piece's hold (board.yaml gripper
   live:  <lerobot-venv>/python scripts/play_moves.py --live --moves g1f3,g2g3
 
 The whole sequence is planned and run in sim first (safety rule 4); live only starts if that
-passes. Live (follower_1 only for now: follower_2 is not calibrated) needs board.yaml
+passes. Live (--arms, default follower_1; follower_2 once probed) needs board.yaml
 `measured: true`, RF-DETR/vision_server.py running, the real board matching --fen, and a typed
 "yes". After each move the camera grades the squares near it (success / not_picked / lost /
 misplaced / disturbed / unclear); anything but success stops the run with the arm holding.
@@ -57,7 +57,7 @@ from magnus_bot.vision.verify import (
 
 ROOT = Path(__file__).resolve().parents[1]
 HOVER = 0.10  # lift / travel height (m), as tune_grasp.py
-LIVE_ARMS = {"follower_1"}  # follower_2 is not calibrated yet
+DEFAULT_LIVE_ARMS = "follower_1"  # follower_2 joins once it is probed and fitted (--arms)
 
 
 def pass_turn(board: chess.Board, robot: chess.Color) -> None:
@@ -110,6 +110,8 @@ def main(argv: list[str] | None = None, prompt=input) -> int:
     parser.add_argument("--moves", required=True, help="comma-separated UCI, e.g. g1f3,g2g3")
     parser.add_argument("--fen", default=chess.STARTING_FEN, help="the real board before the first move")
     parser.add_argument("--live", action="store_true", help="drive the real arm (gated)")
+    parser.add_argument("--arms", default=DEFAULT_LIVE_ARMS,
+                        help="arms allowed to move live, comma-separated (e.g. follower_1,follower_2)")
     parser.add_argument("--vision-url", default=DEFAULT_VISION_URL)
     parser.add_argument("--vision-timeout", type=float, default=10.0)
     parser.add_argument("--log", type=Path, default=None)
@@ -126,10 +128,15 @@ def main(argv: list[str] | None = None, prompt=input) -> int:
     config = dataclasses.replace(config, arms=dataclasses.replace(config.arms, z_clear=HOVER))
     kin = SO101Kinematics()
     rmap = reach_map(config, kin)
-    # The servos' physical stops (LeRobot calibration), to choose grasps each arm can really reach.
-    smap = load_servo_map(ROOT / "hardware" / "servo_maps" / "follower_1.json")
-    stops = servo_stops(config.arms.arms["follower_1"].calibration_id)
-    if stops is None:
+    live_arms = {a.strip() for a in args.arms.split(",") if a.strip()}
+    if live_arms - set(config.arms.arms):
+        parser.error(f"--arms: unknown {sorted(live_arms - set(config.arms.arms))}")
+    # Per arm: servo map, and the servos' physical stops (LeRobot calibration) to choose grasps
+    # each arm can really reach.
+    smaps = {a: load_servo_map(ROOT / "hardware" / "servo_maps" / f"{a}.json") for a in config.arms.arms}
+    stops = {a: st for a in config.arms.arms
+             if (st := servo_stops(config.arms.arms[a].calibration_id)) is not None}
+    if not stops:
         print("note: no LeRobot calibration found; grasps are chosen on URDF limits only", file=sys.stderr)
 
     # --- sim pass of the whole sequence (safety rule 4) ---
@@ -137,7 +144,7 @@ def main(argv: list[str] | None = None, prompt=input) -> int:
     for arm in sim_arms.values():
         arm.connect()
     sim = Executor(config, sim_arms, rmap, simulate=True, kinematics=kin, tuned_grasps=True,
-                   stops=None if stops is None else {"follower_1": stops_in_urdf(smap, stops)})
+                   stops={a: stops_in_urdf(smaps[a], st) for a, st in stops.items()})
     replay = board.copy(stack=False)
     plans = []
     for move in moves:
@@ -165,9 +172,13 @@ def main(argv: list[str] | None = None, prompt=input) -> int:
 
     # --- live ---
     for move, program, arms_used in plans:
-        if set(arms_used) - LIVE_ARMS:
-            print(f"live refused: {move.uci()} needs {', '.join(arms_used)}; only "
-                  f"{', '.join(sorted(LIVE_ARMS))} is calibrated", file=sys.stderr)
+        if set(arms_used) - live_arms:
+            print(f"live refused: {move.uci()} needs {', '.join(arms_used)}; --arms allows only "
+                  f"{', '.join(sorted(live_arms))}", file=sys.stderr)
+            return 1
+        if len(arms_used) > 1:
+            print(f"live refused: {move.uci()} is a handoff between the arms; the pad is not calibrated",
+                  file=sys.stderr)
             return 1
         if off_board(program):
             print(f"live refused: {move.uci()} leaves the board ({', '.join(off_board(program))}); capture "
@@ -195,30 +206,36 @@ def main(argv: list[str] | None = None, prompt=input) -> int:
         return 1
     stamp = time.strftime("%Y%m%d-%H%M%S")
     log_path = args.log or ROOT / "hardware" / "tuning_logs" / f"play_{stamp}.jsonl"
-    print(f"\nLIVE: follower_1 plays {', '.join(m.uci() for m in moves)}; lifts to {HOVER * 100:.0f} cm "
-          f"between pick and place. Each move is graded; anything but success stops with the arm "
-          f"holding.\nlog: {log_path}\nCtrl+C holds the arm. Keep a hand near the power.")
+    used = sorted({a for _, _, arms_used in plans for a in arms_used})
+    print(f"\nLIVE: {' + '.join(used)} play {', '.join(m.uci() for m in moves)}; "
+          f"lifts to {HOVER * 100:.0f} cm between pick and place. Each move is graded; anything but "
+          f"success stops with the arm holding.\nlog: {log_path}\n"
+          "Ctrl+C holds the arm. Keep a hand near the power.")
     if prompt("Type 'yes' to start: ").strip().lower() != "yes":
         print("aborted")
         return 1
 
     from magnus_bot.hardware.lerobot_arm import LeRobotArm
 
-    spec = config.arms.arms["follower_1"]
-    arms = {"follower_1": LeRobotArm(arm_id="follower_1", port=spec.port, calibration_id=spec.calibration_id)}
+    arms = {a: LeRobotArm(arm_id=a, port=config.arms.arms[a].port,
+                          calibration_id=config.arms.arms[a].calibration_id) for a in used}
     code = 0
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with log_path.open("a", encoding="utf-8") as fh:
         try:
-            arms["follower_1"].connect()
-            live = Executor(config, arms, rmap, live=True, to_command=smap.model_to_servo,
-                            limits=smap.servo_limits(kin.model.limits), kinematics=kin, tuned_grasps=True,
-                            stops=None if stops is None else {"follower_1": stops})
+            executors = {}  # one per arm: each has its own servo map (one arm moves per move)
+            for a, arm in arms.items():
+                arm.connect()
+                executors[a] = Executor(config, {a: arm}, rmap, live=True, to_command=smaps[a].model_to_servo,
+                                        limits=smaps[a].servo_limits(kin.model.limits), kinematics=kin,
+                                        tuned_grasps=True, stops={a: stops[a]} if a in stops else None)
             for move in moves:
                 pass_turn(board, robot)
                 san = board.san(move)
                 started = time.time()
-                trajectories = live.plan(build_move_program(board, move, rmap, config))
+                program = build_move_program(board, move, rmap, config)
+                live = executors[program[0].arm_id]
+                trajectories = live.plan(program)
                 live.run(trajectories)
                 check = grade(board, move, reader.read(fresh=True, timeout=args.vision_timeout).occupancy)
                 fh.write(json.dumps({"event": "move", "time": started, "uci": move.uci(), "san": san,
