@@ -217,3 +217,48 @@ def test_arm_z_correction_raises_every_commanded_height():
     lifted = _planned_heights({"follower_1": 0.005, "follower_2": 0.005})
     assert len(plain) == len(lifted) > 0
     assert all(b - a == pytest.approx(0.005) for a, b in zip(plain, lifted, strict=True))
+
+
+# --- the arm must arrive before the gripper acts (2026-10-25 h4 drop) ------
+
+
+class _StallingElbowArm(SimArm):
+    """A SimArm whose elbow stops short of every command (like the real elbow near its limit)."""
+
+    def read_joints(self):
+        joints = super().read_joints()
+        joints["elbow_flex"] -= 0.2  # ~11 deg short
+        return joints
+
+
+def test_trajectories_mark_the_poses_where_the_gripper_acts():
+    config = _low_clear()
+    arms, executor = _sim(config)
+    program = build_move_program(ROOK_H4, H4H5, _full_reach_map(config), config)
+    traj = executor.plan(program)[0]
+    assert [phase for _, phase in traj.checkpoints] == ["grip", "release"]
+    (grip_at, _), (release_at, _) = traj.checkpoints
+    # Arrival at the pick pose, jaws still open; arrival at the place pose, jaws still closed.
+    assert traj.samples[grip_at]["gripper"] == config.arms.gripper_open
+    assert traj.samples[grip_at + 1]["gripper"] < config.arms.gripper_open  # closing starts after
+    assert traj.samples[release_at]["gripper"] == config.arms.gripper_closed
+
+
+def test_gripper_never_moves_when_the_arm_has_not_arrived():
+    config = _low_clear()
+    arms = {"follower_1": _StallingElbowArm("follower_1"), "follower_2": SimArm("follower_2")}
+    for arm in arms.values():
+        arm.connect()
+    executor = Executor(config, arms, _full_reach_map(config), simulate=True)
+    with pytest.raises(ExecutionFault, match="before grip.*NOT moved"):
+        executor.execute_move(ROOK_H4, H4H5)
+    # Stopped at the pick pose: the jaws were never told to close.
+    assert all(c["gripper"] >= config.arms.gripper_open for c in arms["follower_1"].command_log[1:])
+
+
+def test_planned_poses_keep_a_margin_inside_the_joint_limits():
+    limits = {"elbow_flex": JointLimit(-1.0, 1.0), "gripper": JointLimit(0.0, 100.0)}
+    check_limits({"elbow_flex": 0.95, "gripper": 100.0}, limits)  # no margin: inside
+    with pytest.raises(JointLimitError, match="elbow_flex.*8 deg margin"):
+        check_limits({"elbow_flex": 0.95, "gripper": 50.0}, limits, margin=0.14)
+    check_limits({"elbow_flex": 0.5, "gripper": 100.0}, limits, margin=0.14)  # gripper is exempt

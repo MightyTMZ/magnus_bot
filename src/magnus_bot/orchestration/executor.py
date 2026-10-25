@@ -35,11 +35,11 @@ from magnus_bot.geometry.frames import arm_placements
 from magnus_bot.hardware.arm import Arm
 from magnus_bot.hardware.sim_arm import SimArm
 from magnus_bot.kinematics.conventions import model_to_urdf
-from magnus_bot.kinematics.model import JointLimit
+from magnus_bot.kinematics.model import PLAN_LIMIT_MARGIN, JointLimit
 from magnus_bot.kinematics.reach import ReachabilityMap
 from magnus_bot.kinematics.so101_ik import SO101Kinematics, Unreachable, tilted_tip_target
-from magnus_bot.motion.primitives import CLOSE, OPEN, MotionStep, pick_place_steps
-from magnus_bot.motion.trajectory import plan_joint_trajectory
+from magnus_bot.motion.primitives import CLOSE, OPEN, MotionStep, Phase, pick_place_steps
+from magnus_bot.motion.trajectory import plan_joint_trajectory_indexed
 from magnus_bot.planning.assigner import HANDOFF, SINGLE, assign_transfers
 from magnus_bot.planning.handoff import expand_handoff
 from magnus_bot.planning.move_decomposer import BIN, PAD, SQUARE, STASH, Location, Transfer, decompose_move
@@ -54,6 +54,12 @@ JointMap = Callable[[dict[str, float]], dict[str, float]]
 # Max |commanded - read| (rad) per arm joint after a trajectory before it counts as a fault.
 # The gripper is excluded: it stalls on the piece before reaching its closed target.
 VERIFY_TOLERANCE = 0.05
+# Before the gripper closes on a piece or lets go of one, the arm must be at the pose it was sent to
+# (within VERIFY_TOLERANCE), waiting up to this long (s) for it to settle. 2026-10-25 live: the elbow
+# stalled short of the h4 place pose, the gripper opened on schedule, and the rook fell onto the
+# g-file. Now the arm stops and holds instead.
+ARRIVE_TIMEOUT = 2.0
+GRIPPER_PHASES = (Phase.GRIP, Phase.RELEASE)
 
 
 class JointLimitError(ValueError):
@@ -80,6 +86,9 @@ class ArmTrajectory:
     arm_id: str
     transfer: Transfer
     samples: list[dict[str, float]]
+    # (sample index, phase): the arm must have ARRIVED at samples[index] before streaming goes on,
+    # because the next segment opens or closes the gripper there.
+    checkpoints: tuple[tuple[int, str], ...] = ()
 
 
 def location_to_xyz(loc: Location, config: Config, arm_id: str) -> np.ndarray:
@@ -132,12 +141,21 @@ def _arm_steps(arm_id: str, transfer: Transfer, config: Config) -> ArmSteps:
     return ArmSteps(arm_id=arm_id, transfer=transfer, steps=steps)
 
 
-def check_limits(joints: Mapping[str, float], limits: Mapping[str, JointLimit]) -> None:
-    """Raise :class:`JointLimitError` naming every joint outside its limit (never clamp a plan)."""
+def check_limits(joints: Mapping[str, float], limits: Mapping[str, JointLimit], margin: float = 0.0) -> None:
+    """Raise :class:`JointLimitError` naming every joint outside its limit (never clamp a plan).
+
+    ``margin`` (rad) shrinks every arm joint's range (not the gripper's): planned poses keep that far
+    from the limits, where the real servos stall or the links collide.
+    """
+    def ok(n: str, v: float) -> bool:
+        m = 0.0 if n == "gripper" else margin
+        return limits[n].lo + m <= v <= limits[n].hi - m
+
     bad = [
         f"{n}={v:.3f} not in [{limits[n].lo:.3f}, {limits[n].hi:.3f}]"
+        + (f" with the {math.degrees(margin):.0f} deg margin" if margin and n != "gripper" else "")
         for n, v in joints.items()
-        if not limits[n].lo <= v <= limits[n].hi
+        if not ok(n, v)
     ]
     if bad:
         raise JointLimitError(", ".join(bad))
@@ -169,7 +187,10 @@ def plan_joint_program(
         home = dict(rest[arm_steps.arm_id])
         gripper = home["gripper"]
         waypoints = [home]
+        checkpoints = []  # (waypoint index, phase) the arm must reach before the gripper acts
         for step in arm_steps.steps:
+            if step.phase in GRIPPER_PHASES:
+                checkpoints.append((len(waypoints) - 1, step.phase.value))
             if step.gripper == OPEN:
                 gripper = config.arms.gripper_open
             elif step.gripper == CLOSE:
@@ -185,13 +206,14 @@ def plan_joint_program(
             command = to_command(model) if to_command else dict(model)
             command["gripper"] = gripper
             try:
-                check_limits(command, limits)
+                check_limits(command, limits, PLAN_LIMIT_MARGIN)
             except JointLimitError as exc:
                 raise JointLimitError(f"{where}: {exc}") from exc
             waypoints.append(command)
         waypoints.append(home)  # back to rest: clears the board (and the pad) for the other arm
-        samples = plan_joint_trajectory(waypoints, config.arms.speed_scale, hz)
-        trajectories.append(ArmTrajectory(arm_steps.arm_id, arm_steps.transfer, samples))
+        samples, at = plan_joint_trajectory_indexed(waypoints, config.arms.speed_scale, hz)
+        trajectories.append(ArmTrajectory(arm_steps.arm_id, arm_steps.transfer, samples,
+                                          tuple((at[i], phase) for i, phase in checkpoints)))
     return trajectories
 
 
@@ -266,16 +288,34 @@ class Executor:
         try:
             for traj in trajectories:
                 arm = self.arms[traj.arm_id]
+                gates = dict(traj.checkpoints)
                 deadline = time.monotonic()
-                for command in traj.samples:
+                for i, command in enumerate(traj.samples):
                     arm.send_joints(command)
                     if period:
                         deadline += period
                         time.sleep(max(0.0, deadline - time.monotonic()))
+                    if i in gates:  # the gripper acts next: the arm must really be there
+                        self._arrive(arm, command, gates[i])
+                        deadline = time.monotonic()
                 self._verify(arm, traj.samples[-1])
         except Exception as exc:
             self._hold_all()
             raise ExecutionFault(f"motion aborted, arms holding: {exc}") from exc
+
+    def _arrive(self, arm: Arm, target: dict[str, float], phase: str) -> None:
+        """Wait (live: up to ARRIVE_TIMEOUT) until ``arm`` reads back ``target``; else fault."""
+        give_up = time.monotonic() + (ARRIVE_TIMEOUT if self.live else 0.0)
+        while True:
+            actual = arm.read_joints()
+            off = {n: round(math.degrees(actual[n] - v), 1) for n, v in target.items()
+                   if n != "gripper" and not math.isclose(actual[n], v, abs_tol=VERIFY_TOLERANCE)}
+            if not off:
+                return
+            if time.monotonic() >= give_up:
+                raise ExecutionFault(f"{arm.arm_id} did not reach the pose before {phase} "
+                                     f"(off by deg: {off}); the gripper was NOT moved")
+            time.sleep(0.05)
 
     def _verify(self, arm: Arm, target: dict[str, float]) -> None:
         actual = arm.read_joints()

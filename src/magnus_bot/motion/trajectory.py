@@ -69,6 +69,16 @@ def plan_joint_trajectory(
     Consecutive samples are ``1 / hz`` seconds apart. Every waypoint appears exactly once in the
     output, and the first and last samples equal the first and last waypoints.
     """
+    return plan_joint_trajectory_indexed(joint_waypoints, speed_scale, hz, max_velocity)[0]
+
+
+def plan_joint_trajectory_indexed(
+    joint_waypoints: list[dict[str, float]],
+    speed_scale: float,
+    hz: float = 30.0,
+    max_velocity: Mapping[str, float] | None = None,
+) -> tuple[list[dict[str, float]], list[int]]:
+    """:func:`plan_joint_trajectory`, plus the sample index at which each waypoint is reached."""
     if not joint_waypoints:
         raise ValueError("need at least one waypoint")
     if hz <= 0:
@@ -82,6 +92,7 @@ def plan_joint_trajectory(
         raise ValueError(f"no velocity limit for joints {missing}")
 
     samples = [dict(joint_waypoints[0])]
+    indices = [0]
     for start, end in zip(joint_waypoints, joint_waypoints[1:], strict=False):
         if set(end) != set(names):
             raise ValueError(f"waypoint joints {sorted(end)} differ from {sorted(names)}")
@@ -91,4 +102,5 @@ def plan_joint_trajectory(
             np.array([start[n] for n in names]), np.array([end[n] for n in names]), num_steps
         )
         samples.extend(dict(zip(names, (float(v) for v in p), strict=True)) for p in path[1:])
-    return samples
+        indices.append(len(samples) - 1)
+    return samples, indices

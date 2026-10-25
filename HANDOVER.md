@@ -81,6 +81,16 @@ base 0.078 + the arm falling 33 mm short (`arms.reach_correction`) + 2 mm right 
   piece cannot cover g and h: the pitch must be chosen per square (largest that plans, up to the
   tuned one), a planner change not yet made.
 
+- **h-file live (40 deg, z -6/-3):** picked by the stem but at the deep end of the jaws with little
+  leeway, and a place on h4 DROPPED the rook onto the g-file: the wrist rose and the gripper opened
+  before the arm came down. Cause: at h4/h5 40 deg the elbow was planned within 3 deg of its limit;
+  the real elbow stalled short, so the arm stayed high and too far out while the gripper opened on
+  schedule. Fixes: (1) the executor now waits for the arm to ARRIVE (joints within 0.05 rad, up to
+  2 s) before every grip and release, and faults + holds instead of moving the gripper; (2) every
+  planned pose keeps `PLAN_LIMIT_MARGIN` (8 deg) inside each joint limit (executor + reach map).
+  With the margin, h3-h6 plan at <= 35 deg; a shallower grip (`--grip-depth-mm 15`, stem nearer the
+  tips) allows z down to -12 at 30 deg. g-file 60/-9 still plans. Live g3g4 + g5g6 at 60/-9: OK.
+
 ## Earlier session (2026-10-24, Alex + Claude, part 2) — reach probe, geometry calibrated
 - **Why:** after the live tuning run missed every time, the camera could only say "not picked".
   Measuring WHERE the arm goes split the miss into motors vs geometry.
