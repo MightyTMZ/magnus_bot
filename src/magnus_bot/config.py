@@ -59,15 +59,19 @@ class ArmConfig:
 class ArmCorrection:
     """Where one real arm lands vs its model, measured on the rig, added to every commanded fingertip
     target (arm frame, m): the arm falls ``reach`` short along its reach, lands ``side`` to its RIGHT
-    (so commands go that much to its left) and sits ``z`` low. All zero = trust the model."""
+    (so commands go that much to its left), sits ``z`` low, and its base sits ``lateral`` to its
+    RIGHT of where the config puts it (a fixed shift on every square; the reach error it causes
+    grows across the ranks). All zero = trust the model."""
 
     reach: float = 0.0
     side: float = 0.0
     z: float = 0.0
+    lateral: float = 0.0
 
     def apply(self, target: np.ndarray) -> np.ndarray:
         """The fingertip target to command so the real tip lands on ``target`` (arm frame)."""
         x, y, z = (float(v) for v in target)
+        y += self.lateral  # the base sits to the arm's right: aim that much further left
         r = math.hypot(x, y)
         if r == 0.0:
             return np.array([x, y, z + self.z])
@@ -82,7 +86,7 @@ class ArmCorrection:
         along = math.sqrt(max(rho * rho - self.side * self.side, 0.0))  # = r + reach
         phi = math.atan2(y, x) - math.atan2(self.side, along)
         r = along - self.reach
-        return np.array([r * math.cos(phi), r * math.sin(phi), z - self.z])
+        return np.array([r * math.cos(phi), r * math.sin(phi) - self.lateral, z - self.z])
 
 
 @dataclass(frozen=True)
@@ -101,6 +105,7 @@ class ArmsConfig:
     # reach / lands this much to its RIGHT. Commands go that much further / to its left. Missing = 0.
     reach_correction: dict[str, float] = field(default_factory=dict)
     side_correction: dict[str, float] = field(default_factory=dict)
+    lateral_correction: dict[str, float] = field(default_factory=dict)  # base shift to the arm's right
     # Per arm: every GRASP aims this far to the arm's left of the square (m), on top of the grasp's
     # own side_offset_mm: the jaws open to one side of the aim point (operator, 2026-10-25).
     grasp_side_offset: dict[str, float] = field(default_factory=dict)
@@ -108,7 +113,8 @@ class ArmsConfig:
     def correction(self, arm_id: str) -> ArmCorrection:
         return ArmCorrection(reach=self.reach_correction.get(arm_id, 0.0),
                              side=self.side_correction.get(arm_id, 0.0),
-                             z=self.z_correction.get(arm_id, 0.0))
+                             z=self.z_correction.get(arm_id, 0.0),
+                             lateral=self.lateral_correction.get(arm_id, 0.0))
 
     def corrections(self) -> dict[str, ArmCorrection]:
         return {arm_id: self.correction(arm_id) for arm_id in self.arms}
@@ -264,6 +270,7 @@ def load_config(config_dir: str | Path | None = None) -> Config:
         z_correction=_float_map(arms_raw, "z_correction"),
         reach_correction=_float_map(arms_raw, "reach_correction"),
         side_correction=_float_map(arms_raw, "side_correction"),
+        lateral_correction=_float_map(arms_raw, "lateral_correction"),
         grasp_side_offset=_float_map(arms_raw, "grasp_side_offset"),
     )
 

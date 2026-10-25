@@ -241,7 +241,7 @@ class GeometryFit:
     """The arm geometry that best explains a set of probes."""
 
     edge_gap: float  # base yaw axis -> near board edge, m
-    correction: ArmCorrection  # reach / side landing error (z is left to the ruler)
+    correction: ArmCorrection  # reach / side / lateral landing error (z is left to the ruler)
     rms_mm: float
     residuals_mm: list[tuple[float, float]]  # per sample, in order: (reach, side) the fit still misses
 
@@ -256,27 +256,29 @@ def predict_seen(sample: ProbeSample, arm_id: str, square_size: float, edge_gap:
 
 def fit_geometry(samples: list[ProbeSample], arm_id: str, square_size: float,
                  start_gap: float) -> GeometryFit:
-    """Least-squares edge_gap + reach + side corrections from camera probes.
+    """Least-squares edge_gap + reach + side + lateral corrections from camera probes.
 
     The base gap and the reach shortfall look alike on the arm's centre line but not off it: a gap
     error rotates the line to every square (sideways misses that grow away from the centre line),
-    a reach shortfall does not. So the probes must spread sideways (3+ squares across ranks)."""
-    if len(samples) < 3 or len({chess.square_rank(chess.parse_square(s.square)) for s in samples}) < 2:
-        raise ValueError("need 3+ probed squares on 2+ ranks to separate the base gap from the reach")
-    params = np.array([start_gap, 0.0, 0.0])
+    a reach shortfall does not. A base shifted sideways makes squares on one side of the arm land
+    long and on the other short (2026-10-25 follower_2: rank 3 -4 mm, rank 6 +14 mm). So the probes
+    must spread across ranks: 4+ squares on 2+ ranks."""
+    if len(samples) < 4 or len({chess.square_rank(chess.parse_square(s.square)) for s in samples}) < 2:
+        raise ValueError("need 4+ probed squares on 2+ ranks to separate the base gap from the reach")
+    params = np.array([start_gap, 0.0, 0.0, 0.0])
 
     def residuals(p: np.ndarray) -> np.ndarray:
-        c = ArmCorrection(reach=p[1], side=p[2])
+        c = ArmCorrection(reach=p[1], side=p[2], lateral=p[3])
         return np.concatenate([predict_seen(s, arm_id, square_size, p[0], c) - s.seen_xy for s in samples])
 
     for _ in range(20):  # Gauss-Newton; the problem is nearly linear, so this converges in a few steps
         res = residuals(params)
-        jac = np.column_stack([(residuals(params + d) - res) / 1e-6 for d in np.eye(3) * 1e-6])
+        jac = np.column_stack([(residuals(params + d) - res) / 1e-6 for d in np.eye(4) * 1e-6])
         step = np.linalg.lstsq(jac, -res, rcond=None)[0]
         params = params + step
         if np.max(np.abs(step)) < 1e-7:
             break
-    correction = ArmCorrection(reach=float(params[1]), side=float(params[2]))
+    correction = ArmCorrection(reach=float(params[1]), side=float(params[2]), lateral=float(params[3]))
     placement = arm_placements(square_size, float(params[0]))[arm_id]
     per_sample = [split_mm(s.seen_xy - predict_seen(s, arm_id, square_size, params[0], correction),
                            unit(s.seen_xy - placement.base_xy)) for s in samples]

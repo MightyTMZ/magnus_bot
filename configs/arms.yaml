@@ -14,7 +14,7 @@ edge_gap:
                      # reach_correction). The earlier 0.114 put all of that shortfall into the base
                      # position, which left pan angles too small: 7-20 mm misses to the arm's right
                      # toward rank 1 (g3/g4/h4), and to its left toward rank 8 (g6).
-  follower_2: 0.067  # ruler value, NOT yet probed: probably off the same way; probe before trusting.
+  follower_2: 0.069  # CAMERA-FITTED 2026-10-25 (10 probes a3-c6; rms 9.0 -> 3.0 mm with lateral_correction)
 
 # Where each real arm lands vs its model; added to every commanded fingertip target (m).
 # reach / side: CAMERA-FITTED by scripts/fit_arm_geometry.py from reach_probe logs (2026-10-25 refit from
@@ -23,8 +23,13 @@ edge_gap:
 # z: by ruler (reach_probe.py --ask-height): commanded 10 mm, tip at 6 / 6 / 3.5 mm on g4/g5/h4.
 reach_correction:   # the arm falls this much SHORT along its reach
   follower_1: 0.036
+  follower_2: -0.008
 side_correction:    # the arm lands this much to its RIGHT (+ = command further to its left)
   follower_1: 0.007  # toward rank 1; f-file grasps closed toward rank 8 at 0.002
+  follower_2: 0.015
+lateral_correction: # the BASE sits this much to the arm's RIGHT of where edge_gap / the board centre
+                    # line put it (a fixed shift: squares on one side land long, the other short)
+  follower_2: -0.015  # i.e. 15 mm to its LEFT (toward rank 8): rank 3 landed -4 mm, rank 6 +14 mm
 z_correction:       # the arm sits this much LOWER than the model
   follower_1: 0.005
   follower_2: 0.006  # ruler, first follower_2 probe 2026-10-25 (-6.2 mm on average)

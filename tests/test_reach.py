@@ -55,9 +55,9 @@ def test_rig_numbers_top_down(rig):
     grasp = _rmap(rig)
     # follower_1 camera-fitted 2026-10-25 (scripts/fit_arm_geometry.py): base 76 mm + the arm 36 mm
     # short + 7 mm right, checked on the commanded (corrected) targets: 16 squares (union 40).
-    assert len(set().union(*grasp.reachable.values())) == 40  # measured asymmetric rig
+    assert len(set().union(*grasp.reachable.values())) == 41  # measured asymmetric rig
     assert len(grasp.reachable["follower_1"]) == 16  # files f-h top-down, fewer f squares
-    assert len(grasp.reachable["follower_2"]) == 24  # nearer arm (67 mm, ruler value, not probed)
+    assert len(grasp.reachable["follower_2"]) == 25  # camera-fitted 2026-10-25 (base 69 mm, 15 mm off-centre)
     assert not grasp.reachable["follower_1"] & grasp.reachable["follower_2"]
     hover = _rmap(rig, z_clear=config.arms.z_clear)
     assert all(not squares for squares in hover.reachable.values())
@@ -107,7 +107,7 @@ def test_pitch_opens_squares_top_down_cannot_reach(rig):
     s, zg = config.board.square_size, config.arms.z_grasp
     fix = config.arms.corrections()
     top_union = set().union(*compute_reachability(placements, kin, zg, s, corrections=fix).reachable.values())
-    assert len(top_union) == 40  # matches test_rig_numbers_top_down (measured asymmetric rig)
+    assert len(top_union) == 41  # matches test_rig_numbers_top_down (measured asymmetric rig)
 
     tilt = compute_reachability(placements, kin, zg, s, max_pitch=np.radians(50), corrections=fix)
     tilt_union = set().union(*tilt.reachable.values())

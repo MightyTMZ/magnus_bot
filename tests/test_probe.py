@@ -215,7 +215,7 @@ def test_fit_needs_squares_spread_across_ranks():
 def test_fit_works_for_follower_2_mirrored_on_the_a_file_side():
     f2_model = arm_placements(SIZE, 0.067)["follower_2"]  # what the config says (ruler value)
     truth = arm_placements(SIZE, 0.050)["follower_2"]
-    fix = ArmCorrection(reach=0.030, side=-0.004)
+    fix = ArmCorrection(reach=0.030, side=-0.004, lateral=-0.015)  # base 15 mm off to its left
     samples = []
     for sq in ("a3", "a6", "b3", "b4", "b5", "b6", "c3", "c4", "c5", "c6"):
         p = plan_probe(sq, f2_model, KIN, model_to_urdf, KIN.model.limits, square_size=SIZE, z=0.010,
@@ -226,3 +226,10 @@ def test_fit_works_for_follower_2_mirrored_on_the_a_file_side():
     assert fit.edge_gap == pytest.approx(0.050, abs=1e-6)
     assert fit.correction.reach == pytest.approx(0.030, abs=1e-6)
     assert fit.correction.side == pytest.approx(-0.004, abs=1e-6)
+    assert fit.correction.lateral == pytest.approx(-0.015, abs=1e-6)
+
+
+def test_correction_with_a_lateral_base_shift_still_inverts():
+    fix = ArmCorrection(reach=0.03, side=0.01, z=0.005, lateral=-0.015)
+    target = np.array([0.15, 0.06, 0.02])
+    assert fix.undo(fix.apply(target)) == pytest.approx(target, abs=1e-12)

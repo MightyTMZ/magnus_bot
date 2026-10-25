@@ -164,6 +164,14 @@ base 0.078 + the arm falling 33 mm short (`arms.reach_correction`) + 2 mm right 
   so the idle arm parked at rest does not disturb grading unless it hides the move's squares.
   Still to do for follower_2: re-run its probe.
 
+- **follower_2 probed + fitted (2026-10-25):** reach error grew across the ranks (a3 -4 mm, a6
+  +14): the base sits off the board's centre line. New fit term `lateral_correction` (base shift
+  to the arm's right; ArmCorrection.lateral). follower_2: edge_gap 0.069, reach -0.008, side
+  0.015, lateral -0.015 (15 mm toward rank 8): rms 9.0 -> 3.0 mm. z_correction 0.006 (ruler; a
+  re-probe still read -3.4 mm, as follower_1 did after its correction: likely a ruler bias, left).
+  follower_1 refit with lateral would only go 7.0 -> 5.4 mm: left as is (it works).
+  Sim: rook 60/-9 plans on c4c5 but not b4b5 (elbow); b2b3, c2c4, Nc3 plan in play_moves.
+
 ## Earlier session (2026-10-24, Alex + Claude, part 2) — reach probe, geometry calibrated
 - **Why:** after the live tuning run missed every time, the camera could only say "not picked".
   Measuring WHERE the arm goes split the miss into motors vs geometry.

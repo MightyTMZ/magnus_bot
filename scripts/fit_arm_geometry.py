@@ -100,6 +100,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  edge_gap:          {args.arm}: {fit.edge_gap:.3f}   (now {now_gap:.3f})")
     print(f"  reach_correction:  {args.arm}: {fit.correction.reach:.3f}   (now {now.reach:.3f})")
     print(f"  side_correction:   {args.arm}: {fit.correction.side:.3f}   (now {now.side:.3f})")
+    print(f"  lateral_correction: {args.arm}: {fit.correction.lateral:.3f}   (now {now.lateral:.3f})")
     return 0
 
 
