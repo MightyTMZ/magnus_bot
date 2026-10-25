@@ -2,6 +2,24 @@
 # pitch_deg: tool tilt from vertical. z_offset_mm: added to board.yaml grasp_height[piece].
 # confirmed: fresh trials that passed at this setting before it was saved.
 # Read by Config.grasp_for (first_move.py uses it). Delete a piece's entry to go back to untuned.
+bishop:
+  confirmed: 'live at 45 deg: 12/12 (z 0: 8/8, -6: 2/2, +6: 2/2); tilt set to 40 by
+    the operator (same grip point)'
+  date: '2026-10-25'
+  grip_depth_mm: null
+  pitch_deg: 40.0
+  side_offset_mm: 0.0
+  tuned_on: follower_1 g4g5 2026-10-25
+  z_offset_mm: 0.0
+queen:
+  confirmed: live 1/1 at 45 deg z -6; raised 4 mm by the operator onto a steadier
+    part of the stem (unconfirmed)
+  date: '2026-10-25'
+  grip_depth_mm: null
+  pitch_deg: 45.0
+  side_offset_mm: 0.0
+  tuned_on: follower_1 g4g5 2026-10-25
+  z_offset_mm: -2.0
 rook:
   confirmed: '9/10 live at 60 deg (-9: 5/6; -12: 2/2; -6: 2/2)'
   date: '2026-10-25'
