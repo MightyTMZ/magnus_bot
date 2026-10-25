@@ -1,8 +1,8 @@
-import cv2
 import json
 import os
 
-from board import CROP_PATH, ROTATE_CODE, prep_frame, save_crop
+import cv2
+from board import CORNERS_PATH, CROP_PATH, ROTATE_CODE, prep_frame, save_crop
 
 cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
@@ -19,7 +19,8 @@ if not ret:
     raise SystemExit(1)
 
 rotated = raw if ROTATE_CODE is None else cv2.rotate(raw, ROTATE_CODE)
-roi = cv2.selectROI("drag a box around the board, then ENTER (empty box = no crop)", rotated, showCrosshair=False)
+roi = cv2.selectROI("drag a box around the board, then ENTER (empty box = no crop)", rotated,
+                    showCrosshair=False)
 cv2.destroyAllWindows()
 
 x, y, w, h = roi
@@ -72,8 +73,8 @@ cap.release()
 cv2.destroyAllWindows()
 
 if len(corners) == 4:
-    with open('corners.json', 'w') as f:
+    with open(CORNERS_PATH, 'w') as f:
         json.dump(corners, f)
-    print(f"Corners saved to corners.json: {corners}")
+    print(f"Corners saved to {CORNERS_PATH}: {corners}")
 else:
     print("Calibration cancelled, need exactly 4 corners.")

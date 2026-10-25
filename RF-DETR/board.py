@@ -10,6 +10,7 @@ FOOT = 0.35
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CROP_PATH = os.path.join(HERE, "crop.json")
+CORNERS_PATH = os.path.join(HERE, "corners.json")
 # The phone is mounted sideways, so every frame is rotated before anything else.
 # Set to None to disable rotation.
 ROTATE_CODE = cv2.ROTATE_90_CLOCKWISE
@@ -44,7 +45,7 @@ def prep_frame(frame):
         frame = frame[y:y + h, x:x + w]
     return frame
 
-def load_homography(path="corners.json"):
+def load_homography(path=CORNERS_PATH):
     with open(path) as f:
         corners = json.load(f)
     
@@ -72,23 +73,25 @@ def box_to_square(box,H):
     x, y = box_anchor(box)
     return point_to_square(x,y,H)
 
-def build_board(detections, H):
-    board = {}
+def build_pieces(detections, H):
+    """Class name of the most confident detection on each square, e.g. {"g3": "white-rook"}."""
+    pieces = {}
     best = {}
     confidences = detections.confidence
     for i, (box, name) in enumerate(zip(detections.xyxy, detections.data["class_name"])):
         square = box_to_square(box, H)
         if square is None:
             continue
-        if str(name).startswith("white"):
-            color = "W"
-        else:
-            color = "B"
         score = float(confidences[i]) if confidences is not None else 0.0
         if square not in best or score > best[square]:
             best[square] = score
-            board[square] = color
-    return board
+            pieces[square] = str(name)
+    return pieces
+
+
+def build_board(detections, H):
+    """Color on each square, "W" or "B" (anything not white counts as black)."""
+    return {sq: "W" if name.startswith("white") else "B" for sq, name in build_pieces(detections, H).items()}
 
 def print_board(board):
     for rank in range(8, 0, -1):

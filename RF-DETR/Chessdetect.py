@@ -10,7 +10,7 @@ import numpy as np
 import supervision as sv
 from rfdetr import RFDETRSmall
 
-from board import build_board, draw_grid, draw_points, load_homography
+from board import build_board, draw_grid, draw_points, load_homography, prep_frame, CORNERS_PATH
 from moves import find_move, is_rook_sacrifice
 
 CLIP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "RookSacrifice.mp4")
@@ -78,7 +78,7 @@ last_sent = 0
 checked_frame = False
 
 H = load_homography()
-with open("corners.json") as f:
+with open(CORNERS_PATH) as f:
     saved_corners = json.load(f)
 
 
@@ -175,6 +175,10 @@ while True:
 
     if not ref:
         break
+
+    # Same rotate + crop as Calibrate.py, so corners.json and the detections
+    # share one coordinate space.
+    frame = prep_frame(frame)
 
     if not checked_frame:
         h, w = frame.shape[:2]

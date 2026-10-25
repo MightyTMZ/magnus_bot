@@ -35,6 +35,10 @@ Thumbs.db
 *.log
 logs/
 data/
+hardware/tuning_logs/
+
+# RF-DETR weights come from HuggingFace (weights_2.0.pt is ~122 MB, over GitHub's 100 MB limit)
+RF-DETR/model/
 
 # Self-test outputs written next to scripts/hardware_selftest.py
 scripts/baseline.json
