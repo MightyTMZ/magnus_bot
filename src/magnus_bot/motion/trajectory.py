@@ -78,14 +78,11 @@ def plan_joint_trajectory_indexed(
     hz: float = 30.0,
     max_velocity: Mapping[str, float] | None = None,
     segment_scales: list[float] | None = None,
-    pass_through: set[int] | frozenset[int] = frozenset(),
 ) -> tuple[list[dict[str, float]], list[int]]:
     """:func:`plan_joint_trajectory`, plus the sample index at which each waypoint is reached.
 
     ``segment_scales`` (one per segment) multiplies ``speed_scale`` for that segment, e.g. faster
-    long travel moves than the careful moves near the pieces. The product is still clamped to 1.
-    Waypoints in ``pass_through`` (by index) are flowed through without stopping: a run of them is
-    one min-jerk motion along the joint-space polyline, timed as the sum of its segments."""
+    long travel moves than the careful moves near the pieces. The product is still clamped to 1."""
     if not joint_waypoints:
         raise ValueError("need at least one waypoint")
     if hz <= 0:
@@ -100,36 +97,16 @@ def plan_joint_trajectory_indexed(
     if missing:
         raise ValueError(f"no velocity limit for joints {missing}")
 
-    for w in joint_waypoints[1:]:
-        if set(w) != set(names):
-            raise ValueError(f"waypoint joints {sorted(w)} differ from {sorted(names)}")
     samples = [dict(joint_waypoints[0])]
     indices = [0]
-    last = len(joint_waypoints) - 1
-    i = 0
-    while i < last:
-        j = i + 1
-        while j < last and j in pass_through:
-            j += 1
-        points = [np.array([w[n] for n in names]) for w in joint_waypoints[i:j + 1]]
-        times = [segment_duration(joint_waypoints[k], joint_waypoints[k + 1], limits,
-                                  clamp_speed_scale(speed_scale * factors[k])) for k in range(i, j)]
-        total = sum(times)
-        bounds = np.cumsum([0.0, *times]) / total if total > 0 else np.linspace(0.0, 1.0, len(points))
-        num_steps = max(2, math.ceil(total * hz) + 1)
-        reached = [False] * len(points)
-        for step in range(1, num_steps):
-            s = min_jerk_scalar(step / (num_steps - 1))
-            k = min(int(np.searchsorted(bounds, s, side="right")) - 1, len(points) - 2)
-            span = bounds[k + 1] - bounds[k]
-            local = 0.0 if span <= 0 else min(max((s - bounds[k]) / span, 0.0), 1.0)
-            point = points[k] + (points[k + 1] - points[k]) * local
-            samples.append(dict(zip(names, (float(v) for v in point), strict=True)))
-            for m in range(1, len(points)):  # the sample index at which each waypoint is passed
-                if not reached[m] and s >= bounds[m] - 1e-12:
-                    reached[m] = True
-                    indices.append(len(samples) - 1)
-        while len(indices) < j + 1:  # rounding: any waypoint not yet marked is reached at the end
-            indices.append(len(samples) - 1)
-        i = j
+    for start, end, factor in zip(joint_waypoints, joint_waypoints[1:], factors, strict=False):
+        if set(end) != set(names):
+            raise ValueError(f"waypoint joints {sorted(end)} differ from {sorted(names)}")
+        duration = segment_duration(start, end, limits, clamp_speed_scale(speed_scale * factor))
+        num_steps = max(2, math.ceil(duration * hz) + 1)
+        path = min_jerk_interp(
+            np.array([start[n] for n in names]), np.array([end[n] for n in names]), num_steps
+        )
+        samples.extend(dict(zip(names, (float(v) for v in p), strict=True)) for p in path[1:])
+        indices.append(len(samples) - 1)
     return samples, indices

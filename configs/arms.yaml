@@ -40,14 +40,9 @@ z_correction:       # the arm sits this much LOWER than the model
 # heads; operator: +2-3 mm more -> 3 mm.
 # Per arm, per square: [reach, side] mm added to the aim at that square only (pick or place, any
 # piece); + = further from the arm / to its left. For single squares where an arm lands a bit off.
-# "square:piece" (e.g. "e3:bishop") applies to that piece only and wins over the plain square.
 square_nudge_mm:
   follower_1:
     f7: [4, -4]  # 2026-10-25: the queen landed short and left of f7 (Qxf7); operator: front-right
-    e3: [0, 2]   # 2026-10-25: picking the queen off the pad (Qh5 leg 2): 2 mm more on top of the
-                 # queen's h5 offset (6 -> 8 mm at e3; h5 keeps 6)
-    "e3:bishop": [4, -4]  # 2026-10-25: Bc4's drop-off on the pad landed short of the square:
-                          # release further toward the a-file (reach) and rank 8 (the arm's right)
 
 grasp_side_offset:
   follower_1: 0.003
@@ -60,10 +55,6 @@ speed_scale: 0.3
 # faster; the moves near the pieces (descend, grip, release, lift) stay at speed_scale. 2026-10-25:
 # operator asked +25%. Peak joint speed then ~32 deg/s, well under the 120 deg/s per-command clamp.
 travel_speedup: 1.25
-# The rise straight up after a pick and after a place runs this much faster (peak ~52 deg/s at 2.0):
-# 2026-10-25 at e3 (follower_1's far reach) the elbow lagged on the slow rise and the arm pulled back
-# while still down, knocking over the bishop it had just placed.
-rise_speedup: 2.0
 
 # Traverse height for the hover/traverse phases. MUST exceed the tallest piece + margin, AND
 # account for the piece hanging below the grasp point. Set 2026-10-24: king 9.9cm + ~1cm

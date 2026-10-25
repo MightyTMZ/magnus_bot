@@ -74,10 +74,12 @@ EASE_GRIP_DEPTH = 0.010
 # swing from the square to rest dipped across the board and knocked pieces over (2026-10-25).
 VIA_REACH = 0.12
 VIA_PITCHES = (math.radians(45.0), math.radians(30.0), math.radians(15.0), 0.0)
-# After a move the arm STAYS up at the via point (VIA_REACH out, travel height) instead of going back
-# down to the (often low) pose it started from: that last swing down swept the edge pieces
-# (2026-10-25). The next move starts from there. (A 14-20 cm park was tried: the real shoulder
-# could not get there.)
+# After a move the arm PARKS high above the gap between its base and the board, instead of going
+# back down to the (often low) pose it started from: that last swing down swept the edge pieces
+# (2026-10-25). The next move starts from there. Highest height that fits the arm's limits wins.
+PARK_REACH = 0.10  # m out from the base (~2 cm over the board edge on this rig)
+PARK_HEIGHTS = (0.20, 0.18, 0.16, 0.14)
+PARK_PITCHES = tuple(math.radians(d) for d in range(0, 91, 5))
 # Before the gripper closes on a piece or lets go of one, the arm must be at the pose it was sent to
 # (within VERIFY_TOLERANCE), waiting up to this long (s) for it to settle. 2026-10-25 live: the elbow
 # stalled short of the h4 place pose, the gripper opened on schedule, and the rook fell onto the
@@ -90,25 +92,6 @@ GRIPPER_PHASES = (Phase.GRIP, Phase.RELEASE)
 # be UP (lift / retract read back) before moving sideways (moving on after ARRIVE_TIMEOUT rather
 # than faulting), and it pauses after the gripper closes / opens so the piece is held / let go.
 UP_PHASES = (Phase.LIFT, Phase.RETRACT)
-# Off the pad (far reach for both arms): lift straight up to PAD_LIFT_Z, then pull the gripper straight
-# back toward the base at that height, same tilt, through points PULLBACK_STEP apart (flowed through,
-# no stops) at PULLBACK_SPEED, ending PULLBACK_TO from the base. 2026-10-25: leaning the shoulder back
-# with the elbow raised did not move the real shoulder at all (3 tries), and a joint-space return let
-# the quick elbow drop the gripper onto the piece just placed; short steps along a line keep every
-# command close to the last, so a lagging joint cannot swing the gripper far.
-PAD_LIFT_Z = 0.13
-PAD_LIFT_HEIGHTS = (PAD_LIFT_Z, 0.12, 0.11, 0.10)  # highest first; far pads may only allow less
-PULLBACK_STEP = 0.02
-PULLBACK_TO = 0.15
-PULLBACK_SPEED = 0.6
-PICK_PULLBACK = 0.08  # after a pick off the pad: pull back this far (m) before carrying the piece on
-PLACE_SPEED = 0.6  # the last descent before letting go: settle the piece onto the square gently
-# Before handing over, a finished arm must have STOPPED moving (a lagging shoulder kept swinging
-# while the other arm reached in): read-backs this close for STILL_FOR, at most STILL_TIMEOUT.
-STILL_TOLERANCE = math.radians(0.5)
-STILL_FOR = 0.15  # s
-STILL_TIMEOUT = 3.0  # s
-CLEAR_TOLERANCE = math.radians(8.0)  # after a pad drop-off: further off than this = not pulled back
 GRIPPER_DWELL = 0.1  # s (0.3 looked stalled, operator 2026-10-25)
 DWELL = "dwell"
 
@@ -271,7 +254,7 @@ def plan_joint_program(
         first_error: Exception | None = None
         for choice in choices:
             try:
-                waypoints, checkpoints, travel, pass_through = _arm_waypoints(
+                waypoints, checkpoints, travel = _arm_waypoints(
                     arm_steps, config, home, placements[arm_steps.arm_id], kinematics, limits, to_command,
                     choice, piece, arm_stops)
                 break
@@ -279,11 +262,9 @@ def plan_joint_program(
                 first_error = first_error or exc
         else:
             raise first_error  # type: ignore[misc]
-        speedup = {"travel": config.arms.travel_speedup, "rise": config.arms.rise_speedup,
-                   "pullback": PULLBACK_SPEED, "place": PLACE_SPEED}
+        fast = config.arms.travel_speedup
         samples, at = plan_joint_trajectory_indexed(waypoints, config.arms.speed_scale, hz,
-                                                    segment_scales=[speedup.get(k, 1.0) for k in travel],
-                                                    pass_through=pass_through)
+                                                    segment_scales=[fast if t else 1.0 for t in travel])
         trajectories.append(ArmTrajectory(arm_steps.arm_id, arm_steps.transfer, samples,
                                           tuple((at[i], phase) for i, phase in checkpoints), choice.label))
     return trajectories
@@ -321,15 +302,7 @@ def _arm_waypoints(arm_steps, config, home, placement, kinematics, limits, to_co
     phase_nudge = {}  # phase -> (reach, side) for the square that step sits over
     for end, loc in (("src", arm_steps.transfer.src), ("dst", arm_steps.transfer.dst)):
         if loc.kind == SQUARE and loc.square is not None:
-            name = chess.square_name(chess.square(*loc.square))
-        elif loc.kind == PAD:  # the pad is a board square too (e3): its nudges apply there
-            f, r = int(config.handoff.pad.x // config.board.square_size), int(config.handoff.pad.y //
-                                                                              config.board.square_size)
-            name = chess.square_name(chess.square(f, r)) if 0 <= f < 8 and 0 <= r < 8 else None
-        else:
-            name = None
-        if name is not None:
-            nudge = nudges.get(f"{name}:{piece}", nudges.get(name))  # a piece's own nudge wins
+            nudge = nudges.get(chess.square_name(chess.square(*loc.square)))
             if nudge:
                 phase_nudge.update({ph: nudge for ph in SQUARE_PHASES[end]})
     gripper = home["gripper"]
@@ -350,6 +323,14 @@ def _arm_waypoints(arm_steps, config, home, placement, kinematics, limits, to_co
                 return cmd
         return None
 
+    def park(grip: float) -> dict[str, float] | None:
+        """High above the arm's own board edge, on its centre line; None if nothing fits."""
+        for z in PARK_HEIGHTS:
+            cmd = reachable(correction.apply(np.array([PARK_REACH, 0.0, z])), PARK_PITCHES, grip)
+            if cmd is not None:
+                return cmd
+        return None
+
     def via(xy_board: np.ndarray, grip: float) -> dict[str, float] | None:
         """Up at travel height near the arm's own board edge, on the line to ``xy_board``; None if no
         tilt reaches it (the move then goes without it)."""
@@ -367,12 +348,10 @@ def _arm_waypoints(arm_steps, config, home, placement, kinematics, limits, to_co
                 return cmd
         return None
 
-    travel = []  # per segment (the one arriving at each waypoint after rest): "travel", "rise" or "near"
-    pass_through: set[int] = set()  # waypoints flowed through without stopping
-    pulled_back = False  # off the pad: the arm ends pulled back toward its base
+    travel = []  # per segment (the one arriving at each waypoint after rest): a long travel move?
     if (start := via(arm_steps.steps[0].xyz[:2], gripper)) is not None:
         waypoints.append(start)  # out of rest: up and over before reaching across the board
-        travel.append("travel")
+        travel.append(True)
     for step in arm_steps.steps:
         if step.phase in GRIPPER_PHASES:  # the arm must be there before the gripper acts
             checkpoints.append((len(waypoints) - 1, step.phase.value))
@@ -405,74 +384,25 @@ def _arm_waypoints(arm_steps, config, home, placement, kinematics, limits, to_co
             check_limits(command, limits)
         except JointLimitError as exc:
             raise JointLimitError(f"{where}: {exc} [{choice.label}]") from exc
-        # At the pad (far reach for both arms), after the place (retract) AND after the pick (lift):
-        # straight up, then a straight line back toward the base. 2026-10-25: picking the bishop off
-        # e3, follower_2's lift lagged and the carry to c4 dragged it along the table.
-        pad_end = ((step.phase == Phase.RETRACT and arm_steps.transfer.dst.kind == PAD)
-                   or (step.phase == Phase.LIFT and arm_steps.transfer.src.kind == PAD))
-        pullback = []
-        if pad_end:  # off the pad: lift higher, then a straight line back toward the base
-            r0 = math.hypot(*aim[:2])
-
-            def line_point(r: float, z: float, aim=aim, r0=r0, gripper=gripper) -> dict[str, float] | None:
-                point = np.array([*(aim[:2] * r / r0), z])
-                try:
-                    tip = correction.apply(tilted_tip_target(point, choice.pitch, kinematics.model.tip_to_pad,
-                                                             choice.grip_depth))
-                    cmd = (to_command or dict)(kinematics.inverse(tip, pitch=choice.pitch))
-                    cmd["gripper"] = gripper
-                    check_limits(cmd, limits)
-                except (Unreachable, JointLimitError):
-                    return None
-                return cmd
-
-            # the highest lift the arm can hold above the pad at this tilt (13 cm when it can)
-            lift_z = next((z for z in PAD_LIFT_HEIGHTS if line_point(r0, z) is not None), None)
-            if lift_z is not None:
-                for k in range(int(r0 / PULLBACK_STEP) + 1):
-                    r = r0 - k * PULLBACK_STEP
-                    stop_at = PULLBACK_TO if step.phase == Phase.RETRACT else r0 - PICK_PULLBACK
-                    if r < stop_at or (cmd := line_point(r, lift_z)) is None:
-                        break  # as far back as this tilt goes
-                    pullback.append(cmd)
-            if pullback:
-                command = pullback[0]  # the lift (straight up above the pad)
-                # ...along a vertical line (points flowed through): a joint-space lift bowed ~11 mm
-                # out, which could nudge the piece just let go of
-                start_z = choice.z if choice.z is not None else config.handoff.pad.z
-                heights = np.arange(start_z + PULLBACK_STEP, lift_z, PULLBACK_STEP)
-                rising = [line_point(r0, h) for h in heights]
-                for cmd in (c for c in rising if c is not None):
-                    waypoints.append(cmd)
-                    travel.append("rise")
-                    pass_through.add(len(waypoints) - 1)
         past = {n: math.degrees(max(stops[n].lo - v, v - stops[n].hi)) for n, v in command.items()
                 if stops and n in stops and not stops[n].lo - STOP_SLACK <= v <= stops[n].hi + STOP_SLACK}
         if past:
             detail = ", ".join(f"{n} {d:.1f} deg" for n, d in past.items())
             raise BeyondServoStop(f"{where}: past the servo stop by {detail} [{choice.label}]")
         waypoints.append(command)
-        travel.append("travel" if step.phase in TRAVEL_PHASES else "rise" if step.phase in UP_PHASES
-                      else "place" if step.phase == Phase.DESCEND_PLACE else "near")
+        travel.append(step.phase in TRAVEL_PHASES)
         if step.phase in UP_PHASES:  # up first: no sideways move before the arm is really up
             checkpoints.append((len(waypoints) - 1, step.phase.value))
-        if pad_end and len(pullback) > 1:
-            for cmd in pullback[1:]:  # then straight back, flowed through without stopping
-                waypoints.append(cmd)
-                travel.append("pullback")
-                pass_through.add(len(waypoints) - 1)
-            pass_through.discard(len(waypoints) - 1)  # ...stopping at the end
-            if step.phase == Phase.RETRACT:
-                pulled_back = True  # after a place: the move ends here
-    if pulled_back:
-        return waypoints, checkpoints, travel, pass_through  # off the pad: end there, pulled back
+    if (high := park(gripper)) is not None:
+        waypoints.append(high)  # already up: back and further up to park, clear of the board
+        travel.append(True)
+        return waypoints, checkpoints, travel
     if (end := via(arm_steps.steps[-1].xyz[:2], gripper)) is not None:
-        waypoints.append(end)  # after the place: already up; now back toward the arm and STAY up
-        travel.append("travel")
-        return waypoints, checkpoints, travel, pass_through
-    waypoints.append(home)  # no via fits: back to rest (clears the board and the pad)
-    travel.append("travel")
-    return waypoints, checkpoints, travel, pass_through
+        waypoints.append(end)  # after the place: already up; now back toward the arm, still high
+        travel.append(True)
+    waypoints.append(home)  # back to rest: clears the board (and the pad) for the other arm
+    travel.append(True)
+    return waypoints, checkpoints, travel
 
 
 class Executor:
@@ -567,10 +497,6 @@ class Executor:
                             self._arrive(arm, command, gates[i], strict=gates[i] not in
                                          {ph.value for ph in UP_PHASES})
                         deadline = time.monotonic()
-                if self.live:
-                    self._wait_still(arm)  # stopped, before any other arm moves near it
-                if traj.transfer.dst.kind == PAD:
-                    self._check_cleared(arm, traj.samples[-1])  # never hand over to a blocked pad
                 self._verify(arm, traj.samples[-1])
         except Exception as exc:
             self._hold_all()
@@ -594,43 +520,15 @@ class Executor:
                                      f"(off by deg: {off}); the gripper was NOT moved")
             time.sleep(0.05)
 
-    def _wait_still(self, arm: Arm) -> None:
-        """Wait until ``arm``'s joints stop changing (or STILL_TIMEOUT): a slow joint catching up."""
-        give_up = time.monotonic() + STILL_TIMEOUT
-        last, since = arm.read_joints(), time.monotonic()
-        while time.monotonic() < give_up:
-            time.sleep(0.05)
-            now = arm.read_joints()
-            if any(abs(now[n] - last[n]) > STILL_TOLERANCE for n in now if n != "gripper"):
-                last, since = now, time.monotonic()
-            elif time.monotonic() - since >= STILL_FOR:
-                return
-        log.warning("%s still moving after %.0f s; going on", arm.arm_id, STILL_TIMEOUT)
-
-    def _check_cleared(self, arm: Arm, target: dict[str, float]) -> None:
-        """After a drop-off on the pad the arm must really have pulled back before the other arm comes
-        for the piece. 2026-10-25: follower_1's shoulder did not lean back (the plan did) and the
-        grippers collided over e3. If shoulder or elbow is CLEAR_TOLERANCE off, fault: every arm holds
-        and the message gives commanded vs actual angles, to find out why."""
-        actual = arm.read_joints()
-        off = {n: (math.degrees(target[n]), math.degrees(actual[n])) for n in ("shoulder_lift", "elbow_flex")
-               if abs(actual[n] - target[n]) > CLEAR_TOLERANCE}
-        if off:
-            detail = "; ".join(f"{n} commanded {c:.1f} deg, at {a:.1f} deg" for n, (c, a) in off.items())
-            raise ExecutionFault(f"{arm.arm_id} did not pull back off the pad ({detail}); the other arm "
-                                 "was NOT started")
-
     def _verify(self, arm: Arm, target: dict[str, float]) -> None:
-        """Where the arm ended vs its last command. Only reported: the move is done by then and the
-        end pose holds nothing (2026-10-25: a 13 deg shoulder sag at the end pose stopped a game)."""
         actual = arm.read_joints()
         off = {
-            n: round(math.degrees(actual[n] - v), 1)
+            n: actual[n] - v
             for n, v in target.items()
             if n != "gripper" and not math.isclose(actual[n], v, abs_tol=VERIFY_TOLERANCE)
         }
         if off:
-            log.warning("%s ended off its last command (deg): %s", arm.arm_id, off)
+            raise ExecutionFault(f"{arm.arm_id} did not reach its target: {off}")
 
     def _hold_all(self) -> None:
         for arm in self.arms.values():
