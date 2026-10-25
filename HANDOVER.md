@@ -66,6 +66,21 @@ base 0.078 + the arm falling 33 mm short (`arms.reach_correction`) + 2 mm right 
   moves g4 only ~2 mm. A tilt-specific reach error (wrist joint zero? tip_to_pad?) would show in
   `reach_probe.py --pitch 60`: the next live step.
 
+- **2026-10-25 refit:** after the camera was recalibrated, a probe read the h-file tip ~38 mm
+  past the board edge while the operator saw it centred: a MARKER ARTEFACT (probe frames are now
+  saved next to each probe log; a re-probe read h4/h6 within 7 mm). Refit from the clean probes
+  only: edge_gap 0.076, reach 0.036, side 0.007 (toward rank 1; f-file grasps closed toward rank 8).
+  Ruler heights on g4/h4/h6: tip another 2-6 mm LOW even with z_correction 5 mm (noisy; not
+  changed, because the tuned grasp z offsets already absorb it).
+- **Live grasps:** g4<->g5 at 60 deg, z -12 / -9 / -6: **6/6**. f4f5 depth 15: 50 deg 0/2,
+  60 deg 1/2 (closing toward rank 8, before the side refit).
+- **The h-file cannot take a level grasp:** it is too close to follower_1's base. At 50-60 deg the
+  wrist would have to sit almost over the base (hover/traverse hit shoulder_lift's limit; at a
+  higher hover the grasp itself needs 10 mm wrist reach). Only <= 45 deg plans there, and then the
+  3 mm scrape guard allows z >= -6 (pads at the top of the g-file working window). One grasp per
+  piece cannot cover g and h: the pitch must be chosen per square (largest that plans, up to the
+  tuned one), a planner change not yet made.
+
 ## Earlier session (2026-10-24, Alex + Claude, part 2) — reach probe, geometry calibrated
 - **Why:** after the live tuning run missed every time, the camera could only say "not picked".
   Measuring WHERE the arm goes split the miss into motors vs geometry.

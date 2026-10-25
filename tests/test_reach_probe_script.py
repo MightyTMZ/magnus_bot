@@ -2,6 +2,7 @@
 
 import importlib.util
 import json
+import re
 import socket
 from pathlib import Path
 
@@ -64,7 +65,8 @@ def test_sim_probe_removes_camera_parallax(probe, tmp_path, capsys):
     assert probe.main(argv) == 0
     out = capsys.readouterr().out
     assert "parallax removed" in out
-    assert "GEOMETRY: on average the tip lands -25 mm along the reach and -0 mm sideways" in out
+    # The sideways mean is ~0 either side of zero (float noise), so its printed sign is not pinned.
+    assert re.search(r"GEOMETRY: on average the tip lands -25 mm along the reach and [+-]0 mm sideways", out)
     row = records(tmp_path / "p.jsonl")[0]
     assert row["z2_m"] == 0.04 and row["camera_squares_z2"] is not None
 
