@@ -90,10 +90,13 @@ GRIPPER_PHASES = (Phase.GRIP, Phase.RELEASE)
 # be UP (lift / retract read back) before moving sideways (moving on after ARRIVE_TIMEOUT rather
 # than faulting), and it pauses after the gripper closes / opens so the piece is held / let go.
 UP_PHASES = (Phase.LIFT, Phase.RETRACT)
-REAR_MARGIN = math.radians(10.0)  # rearing the elbow off the pad stops this short of its limit
-REAR_LEAN = math.radians(85.0)  # ...while the shoulder leans back this much, in the same motion
-# (45 left follower_1 near enough that follower_2 hit it on the handoff, 2026-10-25; 85 parks the
-# shoulder ~-48 deg, inside the ~-61 the real shoulder was seen to reach)
+REAR_MARGIN = math.radians(10.0)  # never closer than this to a joint limit when withdrawing
+# Off the pad, from the release pose, in one motion: the elbow comes up REAR_ELBOW while the shoulder
+# leans back REAR_LEAN. 2026-10-25: with the elbow folded ALL the way up the real shoulder did not
+# move at all (twice): the fold blocks it. 55 deg of elbow keeps it ~50 deg off its stop; the arm
+# parks ~34 cm up, back past its own board edge, shoulder ~-61 deg (servo), which it reaches.
+REAR_ELBOW = math.radians(55.0)
+REAR_LEAN = math.radians(80.0)
 # Before handing over, a finished arm must have STOPPED moving (a lagging shoulder kept swinging
 # while the other arm reached in): read-backs this close for STILL_FOR, at most STILL_TIMEOUT.
 STILL_TOLERANCE = math.radians(0.5)
@@ -297,12 +300,14 @@ def _eased(choice: GraspChoice, tip_to_pad: float) -> list[GraspChoice]:
     return out
 
 
-def _toward_limit(value: float, direction: float, joint: str, limits, stops) -> float:
-    """``joint``'s limit in ``direction`` (the tighter of URDF and servo stop), REAR_MARGIN inside."""
+def _clamped(value: float, direction: float, joint: str, limits, stops) -> float:
+    """``value``, but no further in ``direction`` than ``joint``'s limit (the tighter of URDF and
+    servo stop) less REAR_MARGIN."""
     edge = limits[joint].hi if direction > 0 else limits[joint].lo
     if stops and joint in stops:
         edge = min(edge, stops[joint].hi) if direction > 0 else max(edge, stops[joint].lo)
-    return edge - direction * REAR_MARGIN
+    edge -= direction * REAR_MARGIN
+    return min(value, edge) if direction > 0 else max(value, edge)
 
 
 def _arm_waypoints(arm_steps, config, home, placement, kinematics, limits, to_command, choice, piece,
@@ -401,14 +406,14 @@ def _arm_waypoints(arm_steps, config, home, placement, kinematics, limits, to_co
             # a slow shoulder only means the elbow goes up first: the safe order.
             released = waypoints[-1]
             up = 1.0 if command["elbow_flex"] > released["elbow_flex"] else -1.0  # the retract raises it
-            reared = {**command, "wrist_flex": released["wrist_flex"],
-                      "elbow_flex": _toward_limit(command["elbow_flex"], up, "elbow_flex", limits, stops)}
+            reared = {**released, "gripper": command["gripper"]}  # wrist (and pan) held
+            reared["elbow_flex"] = _clamped(released["elbow_flex"] + up * REAR_ELBOW, up, "elbow_flex",
+                                            limits, stops)
             ahead = via(arm_steps.steps[-1].xyz[:2], gripper)  # which way "back" is for the shoulder
             if ahead is not None:
-                back = 1.0 if ahead["shoulder_lift"] > command["shoulder_lift"] else -1.0
-                lean = command["shoulder_lift"] + back * REAR_LEAN
-                edge = _toward_limit(lean, back, "shoulder_lift", limits, stops)  # never past the limit
-                reared["shoulder_lift"] = min(lean, edge) if back > 0 else max(lean, edge)
+                back = 1.0 if ahead["shoulder_lift"] > released["shoulder_lift"] else -1.0
+                reared["shoulder_lift"] = _clamped(released["shoulder_lift"] + back * REAR_LEAN, back,
+                                                   "shoulder_lift", limits, stops)
             command = reared
         past = {n: math.degrees(max(stops[n].lo - v, v - stops[n].hi)) for n, v in command.items()
                 if stops and n in stops and not stops[n].lo - STOP_SLACK <= v <= stops[n].hi + STOP_SLACK}
