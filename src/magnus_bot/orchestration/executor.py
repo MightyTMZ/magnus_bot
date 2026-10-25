@@ -101,6 +101,7 @@ PAD_LIFT_HEIGHTS = (PAD_LIFT_Z, 0.12, 0.11, 0.10)  # highest first; far pads may
 PULLBACK_STEP = 0.02
 PULLBACK_TO = 0.15
 PULLBACK_SPEED = 0.6
+PICK_PULLBACK = 0.08  # after a pick off the pad: pull back this far (m) before carrying the piece on
 PLACE_SPEED = 0.6  # the last descent before letting go: settle the piece onto the square gently
 # Before handing over, a finished arm must have STOPPED moving (a lagging shoulder kept swinging
 # while the other arm reached in): read-backs this close for STILL_FOR, at most STILL_TIMEOUT.
@@ -404,8 +405,13 @@ def _arm_waypoints(arm_steps, config, home, placement, kinematics, limits, to_co
             check_limits(command, limits)
         except JointLimitError as exc:
             raise JointLimitError(f"{where}: {exc} [{choice.label}]") from exc
-        if step.phase == Phase.RETRACT and arm_steps.transfer.dst.kind == PAD:
-            pullback = []  # off the pad: lift higher, then a straight line back toward the base
+        # At the pad (far reach for both arms), after the place (retract) AND after the pick (lift):
+        # straight up, then a straight line back toward the base. 2026-10-25: picking the bishop off
+        # e3, follower_2's lift lagged and the carry to c4 dragged it along the table.
+        pad_end = ((step.phase == Phase.RETRACT and arm_steps.transfer.dst.kind == PAD)
+                   or (step.phase == Phase.LIFT and arm_steps.transfer.src.kind == PAD))
+        pullback = []
+        if pad_end:  # off the pad: lift higher, then a straight line back toward the base
             r0 = math.hypot(*aim[:2])
 
             def line_point(r: float, z: float, aim=aim, r0=r0, gripper=gripper) -> dict[str, float] | None:
@@ -425,11 +431,21 @@ def _arm_waypoints(arm_steps, config, home, placement, kinematics, limits, to_co
             if lift_z is not None:
                 for k in range(int(r0 / PULLBACK_STEP) + 1):
                     r = r0 - k * PULLBACK_STEP
-                    if r < PULLBACK_TO or (cmd := line_point(r, lift_z)) is None:
+                    stop_at = PULLBACK_TO if step.phase == Phase.RETRACT else r0 - PICK_PULLBACK
+                    if r < stop_at or (cmd := line_point(r, lift_z)) is None:
                         break  # as far back as this tilt goes
                     pullback.append(cmd)
             if pullback:
                 command = pullback[0]  # the lift (straight up above the pad)
+                # ...along a vertical line (points flowed through): a joint-space lift bowed ~11 mm
+                # out, which could nudge the piece just let go of
+                start_z = choice.z if choice.z is not None else config.handoff.pad.z
+                heights = np.arange(start_z + PULLBACK_STEP, lift_z, PULLBACK_STEP)
+                rising = [line_point(r0, h) for h in heights]
+                for cmd in (c for c in rising if c is not None):
+                    waypoints.append(cmd)
+                    travel.append("rise")
+                    pass_through.add(len(waypoints) - 1)
         past = {n: math.degrees(max(stops[n].lo - v, v - stops[n].hi)) for n, v in command.items()
                 if stops and n in stops and not stops[n].lo - STOP_SLACK <= v <= stops[n].hi + STOP_SLACK}
         if past:
@@ -440,13 +456,14 @@ def _arm_waypoints(arm_steps, config, home, placement, kinematics, limits, to_co
                       else "place" if step.phase == Phase.DESCEND_PLACE else "near")
         if step.phase in UP_PHASES:  # up first: no sideways move before the arm is really up
             checkpoints.append((len(waypoints) - 1, step.phase.value))
-        if step.phase == Phase.RETRACT and arm_steps.transfer.dst.kind == PAD and len(pullback) > 1:
+        if pad_end and len(pullback) > 1:
             for cmd in pullback[1:]:  # then straight back, flowed through without stopping
                 waypoints.append(cmd)
                 travel.append("pullback")
                 pass_through.add(len(waypoints) - 1)
             pass_through.discard(len(waypoints) - 1)  # ...stopping at the end
-            pulled_back = True
+            if step.phase == Phase.RETRACT:
+                pulled_back = True  # after a place: the move ends here
     if pulled_back:
         return waypoints, checkpoints, travel, pass_through  # off the pad: end there, pulled back
     if (end := via(arm_steps.steps[-1].xyz[:2], gripper)) is not None:
