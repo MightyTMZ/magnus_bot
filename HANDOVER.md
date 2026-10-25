@@ -156,6 +156,14 @@ base 0.078 + the arm falling 33 mm short (`arms.reach_correction`) + 2 mm right 
   3.4 deg short at the drop-off (arrival check held it): STOP_SLACK 2.5 -> 1.6 deg; h3 now 35 deg.
   Then the opening jaws knocked neighbours: gripper_open 35 -> 26 %.
 
+- **Two arms in frame:** the first follower_2 probe measured follower_1's resting green tip
+  (+252 mm / +219 mm "errors"). The vision server now reports EVERY tip (`markers`) and, with
+  `/board?near=x,y` (board squares), the one nearest that point (none if > 2.5 squares away);
+  `HttpBoardReader.read(near=...)`; reach_probe asks for the tip near its target square. Pieces:
+  occupancy grading only watches squares near the move, and fresh reads wait for a stable board,
+  so the idle arm parked at rest does not disturb grading unless it hides the move's squares.
+  Still to do for follower_2: re-run its probe.
+
 ## Earlier session (2026-10-24, Alex + Claude, part 2) — reach probe, geometry calibrated
 - **Why:** after the live tuning run missed every time, the camera could only say "not picked".
   Measuring WHERE the arm goes split the miss into motors vs geometry.

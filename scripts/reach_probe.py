@@ -89,7 +89,7 @@ class SimCamera:
         self.square_size, self.offset_mm, self.parallax_mm = square_size, offset_mm, parallax_mm
         self.correction = correction or ArmCorrection()
 
-    def read(self, fresh: bool = True, timeout: float = 8.0) -> BoardObservation:
+    def read(self, fresh: bool = True, timeout: float = 8.0, near=None) -> BoardObservation:
         tip = self.kin.forward(self.to_model(self.arm.read_joints()))
         tip = self.correction.undo(tip)  # the physical arm lands this far short / right / low
         xy = self.placement.arm_to_board(tip[:2])
@@ -204,6 +204,7 @@ def main(argv: list[str] | None = None, prompt=input) -> int:
     if not plans:
         print("nothing to probe", file=sys.stderr)
         return 1
+    plan_by_square = {p.square: p for p in plans}
 
     if args.live:
         reader = HttpBoardReader(args.vision_url)
@@ -251,7 +252,10 @@ def main(argv: list[str] | None = None, prompt=input) -> int:
                 """Where the camera sees the fingertip now (board squares), or None. Live, also saves
                 the annotated frame (with the detected marker) next to the log, to check by eye."""
                 try:
-                    marker = reader.read(fresh=True, timeout=args.vision_timeout).marker
+                    # The tip nearest this square: the other arm's painted tip may be in view too.
+                    target = plan_by_square[square].target_xy / size
+                    marker = reader.read(fresh=True, timeout=args.vision_timeout,
+                                         near=(float(target[0]), float(target[1]))).marker
                     if args.live:
                         shot = log_path.with_name(f"{log_path.stem}_{square}_{height * 1000:.0f}mm.jpg")
                         shot.write_bytes(reader.snapshot())

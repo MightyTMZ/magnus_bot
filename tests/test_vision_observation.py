@@ -102,3 +102,12 @@ def test_simulated_board_misses_are_seeded():
         return hits
 
     assert run(7) == run(7)
+
+
+def test_a_reader_can_ask_for_the_tip_near_where_its_arm_should_be(vision_server):
+    # Both arms' painted tips can be in view; the probe asks for the one near its target square.
+    reader = HttpBoardReader(vision_server.url)
+    reader.read(fresh=True, timeout=1.0, near=(1.5, 3.5))
+    reader.read(fresh=True, timeout=1.0)
+    assert "near=1.500%2C3.500" in vision_server.paths[0]
+    assert "near" not in vision_server.paths[1]

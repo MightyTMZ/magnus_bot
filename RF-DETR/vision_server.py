@@ -58,6 +58,7 @@ MAX_FRESH_TIMEOUT = 60.0
 # yellow band is H 27-29, so hue separates them. Re-measure if the paint or lighting changes.
 DEFAULT_MARKER_HSV = "33,55,120,55,255,255"
 MARKER_GROUP_PX = 80  # green blobs this close to the biggest one count as the same fingertip
+NEAR_MAX_SQUARES = 2.5  # ?near=: a tip farther than this from where it should be is someone else's
 OPEN_KERNEL = np.ones((3, 3), np.uint8)
 VIEW_PAGE = b"""<!doctype html><meta charset=utf-8><title>magnus_bot camera</title>
 <style>body{margin:0;background:#111;color:#ddd;font:14px system-ui,sans-serif}
@@ -87,28 +88,44 @@ def parse_hsv(text):
     return np.array(values[:3], np.uint8), np.array(values[3:], np.uint8)
 
 
-def find_marker(frame, H, lo, hi, min_area):
-    """The green fingertip, or None: its lowest visible point (nearest the board, so the least
-    parallax) in pixels and in board squares, and the blob's area in pixels."""
+def find_markers(frame, H, lo, hi, min_area):
+    """Every green fingertip in view, biggest first: each one's lowest visible point (nearest the
+    board, so the least parallax) in pixels and in board squares, and its area in pixels.
+
+    Both arms' tips can be in view at once (2026-10-25: a follower_2 probe measured follower_1's
+    resting tip), so callers that know where their tip should be pick the nearest (``near``)."""
     mask = cv2.morphologyEx(cv2.inRange(cv2.cvtColor(frame, cv2.COLOR_BGR2HSV), lo, hi),
                             cv2.MORPH_OPEN, OPEN_KERNEL)
     n, labels, stats, centroids = cv2.connectedComponentsWithStats(mask)
-    if n <= 1:
+    blobs = sorted((i for i in range(1, n) if stats[i, cv2.CC_STAT_AREA] >= min_area),
+                   key=lambda i: -stats[i, cv2.CC_STAT_AREA])
+    tips = []
+    while blobs:
+        seed = blobs[0]
+        # Both jaw tips are painted: pool the blobs near the biggest (one blob when the jaws are shut).
+        group = [i for i in blobs if np.hypot(*(centroids[i] - centroids[seed])) <= MARKER_GROUP_PX]
+        blobs = [i for i in blobs if i not in group]
+        ys, xs = np.nonzero(np.isin(labels, group))
+        # The camera sits beyond rank 1 looking down the board, so lower points image lower: the
+        # bottom of the blob is the part of the tip closest to the board surface.
+        y = float(np.percentile(ys, 95))
+        x = float(np.median(xs[ys >= np.percentile(ys, 85)]))
+        bx, by = pixel_to_board(x, y, H)
+        tips.append({"px": [round(x, 1), round(y, 1)], "board": [round(bx, 4), round(by, 4)],
+                     "area": int(sum(stats[i, cv2.CC_STAT_AREA] for i in group))})
+    return tips
+
+
+def pick_marker(markers, near=None, near_max=NEAR_MAX_SQUARES):
+    """The tip to report: nearest ``near`` (board squares) within ``near_max``, else the biggest."""
+    if not markers:
         return None
-    biggest = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
-    if stats[biggest, cv2.CC_STAT_AREA] < min_area:
-        return None
-    # Both jaw tips are painted: pool the blobs near the biggest (one blob when the jaws are shut).
-    group = [i for i in range(1, n) if stats[i, cv2.CC_STAT_AREA] >= min_area
-             and np.hypot(*(centroids[i] - centroids[biggest])) <= MARKER_GROUP_PX]
-    area = int(sum(stats[i, cv2.CC_STAT_AREA] for i in group))
-    ys, xs = np.nonzero(np.isin(labels, group))
-    # The camera sits beyond rank 1 looking down the board, so lower points image lower: the
-    # bottom of the blob is the part of the tip closest to the board surface.
-    y = float(np.percentile(ys, 95))
-    x = float(np.median(xs[ys >= np.percentile(ys, 85)]))
-    bx, by = pixel_to_board(x, y, H)
-    return {"px": [round(x, 1), round(y, 1)], "board": [round(bx, 4), round(by, 4)], "area": area}
+    if near is None:
+        return markers[0]
+    best = min(markers, key=lambda m: np.hypot(m["board"][0] - near[0], m["board"][1] - near[1]))
+    if np.hypot(best["board"][0] - near[0], best["board"][1] - near[1]) > near_max:
+        return None  # our tip is hidden; the one in view belongs to the other arm
+    return best
 
 
 class BoardCheck:
@@ -174,7 +191,7 @@ class Reading:
     timestamp: float
     pieces: dict
     occupancy: dict
-    marker: dict | None
+    markers: list  # every fingertip in view, biggest first
 
 
 class BoardState:
@@ -197,11 +214,11 @@ class BoardState:
         with self.cond:
             self.recent.clear()
 
-    def publish(self, pieces, marker=None):
+    def publish(self, pieces, markers=()):
         occupancy = {sq: color_of(name) for sq, name in pieces.items()}
         with self.cond:
             self.frame_id += 1
-            self.recent.append(Reading(self.frame_id, time.time(), pieces, occupancy, marker))
+            self.recent.append(Reading(self.frame_id, time.time(), pieces, occupancy, list(markers)))
             self.cond.notify_all()
 
     def _stable(self, after_frame=0):
@@ -217,28 +234,30 @@ class BoardState:
             return None
         return self.recent[-1]
 
-    def snapshot(self):
+    def snapshot(self, near=None):
         with self.cond:
             if not self.recent:
                 return None
-            return self._payload(self.recent[-1], stable=self._stable() is not None)
+            return self._payload(self.recent[-1], stable=self._stable() is not None, near=near)
 
-    def wait_fresh(self, timeout):
+    def wait_fresh(self, timeout, near=None):
         deadline = time.monotonic() + timeout
         with self.cond:
             start = self.frame_id
             while True:
                 hit = self._stable(after_frame=start)
                 if hit is not None:
-                    return self._payload(hit, stable=True)
+                    return self._payload(hit, stable=True, near=near)
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     return None
                 self.cond.wait(remaining)
 
-    def _payload(self, reading, stable):
-        """Caller holds ``self.cond``. The marker is the median over the recent window."""
-        seen = [r.marker["board"] for r in self.recent if r.marker]
+    def _payload(self, reading, stable, near=None):
+        """Caller holds ``self.cond``. The marker is the median over the recent window of the tip
+        nearest ``near`` (board squares; the biggest without it). ``markers`` lists every tip."""
+        picks = [pick_marker(r.markers, near) for r in self.recent]
+        seen = [m["board"] for m in picks if m]
         marker = None
         if seen:
             marker = [round(statistics.median(p[0] for p in seen), 4),
@@ -253,17 +272,18 @@ class BoardState:
             "occupancy": reading.occupancy,
             "marker": marker,
             "marker_seen": len(seen),
+            "markers": [m["board"] for m in reading.markers],
         }
 
 
 def render(view, box_annotator):
     """The latest frame with boxes, the board grid, piece points and the fingertip marker."""
-    frame, dets, marker, H = view
+    frame, dets, markers, H = view
     out = box_annotator.annotate(frame.copy(), dets) if box_annotator is not None else frame.copy()
     out = draw_grid(out, H)
     if len(dets):
         out = draw_points(out, dets, H)
-    if marker:
+    for marker in markers:
         x, y = (int(v) for v in marker["px"])
         cv2.circle(out, (x, y), 9, (255, 0, 255), 2)
         bx, by = marker["board"]
@@ -298,8 +318,16 @@ def make_handler(state, box_annotator=None):
             self._send(200, jpg.tobytes(), "image/jpeg")
 
         def _board(self, query):
+            near = None
+            if "near" in query:  # where the caller's fingertip should be, board squares "x,y"
+                try:
+                    near = [float(v) for v in query["near"][0].split(",")]
+                    assert len(near) == 2
+                except (ValueError, AssertionError):
+                    self._json(400, {"error": "near must be two numbers 'x,y' (board squares)"})
+                    return
             if query.get("fresh", ["0"])[0].lower() not in ("1", "true", "yes"):
-                payload = state.snapshot()
+                payload = state.snapshot(near)
                 if payload is None:
                     self._json(503, {"error": "no frames yet", "camera_ok": state.camera_ok})
                 else:
@@ -310,7 +338,7 @@ def make_handler(state, box_annotator=None):
             except ValueError:
                 self._json(400, {"error": "timeout must be a number of seconds"})
                 return
-            payload = state.wait_fresh(timeout)
+            payload = state.wait_fresh(timeout, near)
             if payload is None:
                 if not state.calibration_ok:
                     why = "recalibration half done (crop.json newer than corners.json): finish Calibrate.py"
@@ -405,11 +433,11 @@ def main():
             state.contrast = check.contrast(frame)
             state.board_visible = bool(state.contrast >= args.min_contrast)  # plain bool: JSON-safe
             dets = detect(model, frame)
-            marker = find_marker(frame, H, marker_lo, marker_hi, args.marker_min_area)
-            state.latest_view = (frame, dets, marker, H)
+            markers = find_markers(frame, H, marker_lo, marker_hi, args.marker_min_area)
+            state.latest_view = (frame, dets, markers, H)
             if state.board_visible and calib.ok:
                 hidden_since = None
-                state.publish(build_pieces(dets, H), marker)
+                state.publish(build_pieces(dets, H), markers)
             elif hidden_since is None:
                 hidden_since = time.monotonic()
                 print(f"board not visible (contrast {state.contrast}); is the phone connected to iVCam?")

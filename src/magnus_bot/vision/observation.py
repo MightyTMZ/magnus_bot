@@ -77,8 +77,14 @@ class HttpBoardReader:
         self.url = url.rstrip("/")
         self.slack = slack  # socket time allowed beyond the server-side wait
 
-    def read(self, fresh: bool = True, timeout: float = 8.0) -> BoardObservation:
-        query = urlencode({"fresh": int(fresh), "timeout": timeout})
+    def read(self, fresh: bool = True, timeout: float = 8.0,
+             near: tuple[float, float] | None = None) -> BoardObservation:
+        """``near``: where the caller's fingertip should be (board squares); the server then reports
+        the tip nearest it (another arm's tip may be in view), or none within 2.5 squares."""
+        params = {"fresh": int(fresh), "timeout": timeout}
+        if near is not None:
+            params["near"] = f"{near[0]:.3f},{near[1]:.3f}"
+        query = urlencode(params)
         return BoardObservation.from_json(self._get(f"/board?{query}", timeout + self.slack))
 
     def health(self) -> dict:
