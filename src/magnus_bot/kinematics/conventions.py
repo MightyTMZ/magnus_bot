@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import json
 import math
-import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -97,19 +96,6 @@ class ServoMap:
             out[name] = JointLimit(lo, hi)
         return out
 
-    def urdf_limits_within(self, urdf_limits: Mapping[str, JointLimit],
-                           servo_range: Mapping[str, JointLimit]) -> dict[str, JointLimit]:
-        """``urdf_limits`` narrowed to what the servos can really reach (``servo_range``, servo
-        angles), in URDF angles: what planning (reach map + executor) must stay inside."""
-        out = dict(urdf_limits)
-        for name, (sign, offset) in self.joints.items():
-            if name not in servo_range:
-                continue
-            r = servo_range[name]
-            lo, hi = sorted((sign * (r.lo - offset), sign * (r.hi - offset)))
-            out[name] = JointLimit(max(urdf_limits[name].lo, lo), min(urdf_limits[name].hi, hi))
-        return out
-
     def to_dict(self) -> dict:
         return {
             "arm_id": self.arm_id,
@@ -129,48 +115,6 @@ class ServoMap:
 
 def load_servo_map(path: str | Path) -> ServoMap:
     return ServoMap.from_dict(json.loads(Path(path).read_text()))
-
-
-# LeRobot's calibration files: written by `lerobot-calibrate`, read by SO101Follower(id=...).
-LEROBOT_CALIBRATION_DIR = (Path.home() / ".cache" / "huggingface" / "lerobot" / "calibration" / "robots"
-                           / "so_follower")
-SERVO_TICKS = 4095  # STS3215 resolution - 1, as LeRobot normalizes
-
-
-def calibrated_range(calibration: Mapping[str, Mapping]) -> dict[str, JointLimit]:
-    """Each arm joint's reachable range in servo angles (rad) from a LeRobot calibration.
-
-    LeRobot writes range_min / range_max into the servo's own position limits, so the servo stops
-    there whatever it is told, and in degrees mode reports ``(ticks - mid) * 360 / 4095``.
-    2026-10-25: follower_1's elbow stops at +/-96.3 deg; a plan asking 100 deg stalled 4.9 deg short.
-    """
-    out = {}
-    for name in ARM_JOINTS:
-        lo, hi = calibration[name]["range_min"], calibration[name]["range_max"]
-        half = math.radians((hi - lo) / 2 * 360 / SERVO_TICKS)
-        out[name] = JointLimit(-half, half)
-    return out
-
-
-def calibration_dir() -> Path:
-    """Where LeRobot keeps calibrations (``MAGNUS_CALIBRATION_DIR`` overrides it, e.g. in tests)."""
-    return Path(os.environ.get("MAGNUS_CALIBRATION_DIR", LEROBOT_CALIBRATION_DIR))
-
-
-def load_calibrated_range(calibration_id: str, directory: Path | None = None) -> dict[str, JointLimit]:
-    path = Path(directory or calibration_dir()) / f"{calibration_id}.json"
-    return calibrated_range(json.loads(path.read_text()))
-
-
-def real_urdf_limits(smap: ServoMap, urdf_limits: Mapping[str, JointLimit], calibration_id: str,
-                     directory: Path | None = None) -> dict[str, JointLimit] | None:
-    """``urdf_limits`` narrowed to the arm's calibrated servo ranges (URDF angles), or None when
-    there is no calibration file. Plan with these, live AND in the sim pass."""
-    try:
-        servo_range = load_calibrated_range(calibration_id, directory)
-    except OSError:
-        return None
-    return smap.urdf_limits_within(urdf_limits, servo_range)
 
 
 class NudgeError(ValueError):

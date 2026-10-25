@@ -54,9 +54,7 @@ def test_rig_numbers_top_down(rig):
     config = rig[0]
     grasp = _rmap(rig)
     # follower_1 camera-fitted 2026-10-25 (scripts/fit_arm_geometry.py): base 76 mm + the arm 36 mm
-    # short + 7 mm right, checked on the commanded (corrected) targets, 2 deg inside every URDF joint
-    # limit (PLAN_LIMIT_MARGIN): 16 squares (union 40). Live planning narrows further to the servos'
-    # calibrated ranges (conventions.real_urdf_limits).
+    # short + 7 mm right, checked on the commanded (corrected) targets: 16 squares (union 40).
     assert len(set().union(*grasp.reachable.values())) == 40  # measured asymmetric rig
     assert len(grasp.reachable["follower_1"]) == 16  # files f-h top-down, fewer f squares
     assert len(grasp.reachable["follower_2"]) == 24  # nearer arm (67 mm, ruler value, not probed)

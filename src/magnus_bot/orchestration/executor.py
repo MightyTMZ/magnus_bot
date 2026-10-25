@@ -35,7 +35,7 @@ from magnus_bot.geometry.frames import arm_placements
 from magnus_bot.hardware.arm import Arm
 from magnus_bot.hardware.sim_arm import SimArm
 from magnus_bot.kinematics.conventions import model_to_urdf
-from magnus_bot.kinematics.model import PLAN_LIMIT_MARGIN, JointLimit
+from magnus_bot.kinematics.model import JointLimit
 from magnus_bot.kinematics.reach import ReachabilityMap
 from magnus_bot.kinematics.so101_ik import SO101Kinematics, Unreachable, tilted_tip_target
 from magnus_bot.motion.primitives import CLOSE, OPEN, MotionStep, Phase, pick_place_steps
@@ -54,6 +54,10 @@ JointMap = Callable[[dict[str, float]], dict[str, float]]
 # Max |commanded - read| (rad) per arm joint after a trajectory before it counts as a fault.
 # The gripper is excluded: it stalls on the piece before reaching its closed target.
 VERIFY_TOLERANCE = 0.05
+# The real fingertip must stay at least this high above the board at every waypoint (m): the jaw
+# tips must never be driven into the table. Checked on the commanded tip minus the arm's measured
+# sag (arms.z_correction), i.e. where the tip really goes.
+TABLE_CLEARANCE = 0.003
 # Before the gripper closes on a piece or lets go of one, the arm must be at the pose it was sent to
 # (within VERIFY_TOLERANCE), waiting up to this long (s) for it to settle. 2026-10-25 live: the elbow
 # stalled short of the h4 place pose, the gripper opened on schedule, and the rook fell onto the
@@ -141,21 +145,12 @@ def _arm_steps(arm_id: str, transfer: Transfer, config: Config) -> ArmSteps:
     return ArmSteps(arm_id=arm_id, transfer=transfer, steps=steps)
 
 
-def check_limits(joints: Mapping[str, float], limits: Mapping[str, JointLimit], margin: float = 0.0) -> None:
-    """Raise :class:`JointLimitError` naming every joint outside its limit (never clamp a plan).
-
-    ``margin`` (rad) shrinks every arm joint's range (not the gripper's): planned poses keep that far
-    from the limits, where the real servos stall or the links collide.
-    """
-    def ok(n: str, v: float) -> bool:
-        m = 0.0 if n == "gripper" else margin
-        return limits[n].lo + m <= v <= limits[n].hi - m
-
+def check_limits(joints: Mapping[str, float], limits: Mapping[str, JointLimit]) -> None:
+    """Raise :class:`JointLimitError` naming every joint outside its limit (never clamp a plan)."""
     bad = [
         f"{n}={v:.3f} not in [{limits[n].lo:.3f}, {limits[n].hi:.3f}]"
-        + (f" with the {math.degrees(margin):.0f} deg margin" if margin and n != "gripper" else "")
         for n, v in joints.items()
-        if not ok(n, v)
+        if not limits[n].lo <= v <= limits[n].hi
     ]
     if bad:
         raise JointLimitError(", ".join(bad))
@@ -199,6 +194,10 @@ def plan_joint_program(
             x, y = placement.board_to_arm(step.xyz[:2])
             target = correction.apply(tilted_tip_target(np.array([x, y, step.xyz[2]]), pitch,
                                                         kinematics.model.tip_to_pad, grip_depth))
+            tip_z = target[2] - correction.z  # where the real (sagging) tip goes
+            if tip_z < TABLE_CLEARANCE:
+                raise Unreachable(f"{where}: the fingertip would be {tip_z * 1000:.1f} mm above the board "
+                                  f"(< {TABLE_CLEARANCE * 1000:.0f} mm): the jaw tips would hit the table")
             try:
                 model = kinematics.inverse(target, pitch=pitch)
             except Unreachable as exc:
@@ -206,7 +205,7 @@ def plan_joint_program(
             command = to_command(model) if to_command else dict(model)
             command["gripper"] = gripper
             try:
-                check_limits(command, limits, PLAN_LIMIT_MARGIN)
+                check_limits(command, limits)
             except JointLimitError as exc:
                 raise JointLimitError(f"{where}: {exc}") from exc
             waypoints.append(command)

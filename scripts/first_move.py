@@ -32,7 +32,7 @@ import chess
 from magnus_bot.config import load_config
 from magnus_bot.geometry.frames import arm_placements
 from magnus_bot.hardware.sim_arm import SimArm
-from magnus_bot.kinematics.conventions import load_servo_map, real_urdf_limits
+from magnus_bot.kinematics.conventions import load_servo_map
 from magnus_bot.kinematics.reach import compute_reachability
 from magnus_bot.kinematics.so101_ik import SO101Kinematics
 
@@ -70,13 +70,9 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     kin = SO101Kinematics()
-    smap = load_servo_map(SERVO_MAP)  # follower_1 URDF<->servo map
-    spec = config.arms.arms[ARM]
-    real_limits = real_urdf_limits(smap, kin.model.limits, spec.calibration_id)  # servos' real ranges
-    urdf_limits = real_limits or kin.model.limits
     placements = arm_placements(config.board.square_size, config.arms.edge_gap)
     rmap = compute_reachability(
-        placements, kin, config.arms.z_grasp, config.board.square_size, limits=urdf_limits,
+        placements, kin, config.arms.z_grasp, config.board.square_size,
         z_clear=config.arms.z_clear, max_pitch=pitch, grip_depth=grip_depth,
         corrections=config.arms.corrections(),
     )
@@ -95,8 +91,7 @@ def main(argv: list[str] | None = None) -> int:
         arms = {a: SimArm(a) for a in config.arms.arms}
         for arm in arms.values():
             arm.connect()
-        ex = Executor(config, arms, rmap, simulate=True, limits=urdf_limits, pitch=pitch,
-                      grip_depth=grip_depth)
+        ex = Executor(config, arms, rmap, simulate=True, pitch=pitch, grip_depth=grip_depth)
         ex.run(ex.plan(program))  # raises on any unreachable / limit / verify fault
         print(f"SIM OK: {ARM} {label} planned + executed ({len(program[0].steps)} phases), arms at rest.")
         return 0
@@ -104,10 +99,8 @@ def main(argv: list[str] | None = None) -> int:
     # --- live (gated) ---
     from magnus_bot.hardware.lerobot_arm import LeRobotArm
 
-    if real_limits is None:
-        print(f"live refused: no LeRobot calibration for {ARM}, so its real joint ranges are unknown",
-              file=sys.stderr)
-        return 1
+    smap = load_servo_map(SERVO_MAP)  # follower_1 URDF<->servo map
+    spec = config.arms.arms[ARM]
     arm = LeRobotArm(arm_id=ARM, port=spec.port, calibration_id=spec.calibration_id)
     arm.connect()
     try:
@@ -117,7 +110,7 @@ def main(argv: list[str] | None = None) -> int:
             rmap,
             live=True,  # Executor enforces measured:true + a model->servo map
             to_command=smap.model_to_servo,
-            limits=smap.servo_limits(urdf_limits),
+            limits=smap.servo_limits(kin.model.limits),
             kinematics=kin,
             pitch=pitch,
             grip_depth=grip_depth,

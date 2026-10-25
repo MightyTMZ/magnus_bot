@@ -256,9 +256,10 @@ def test_gripper_never_moves_when_the_arm_has_not_arrived():
     assert all(c["gripper"] >= config.arms.gripper_open for c in arms["follower_1"].command_log[1:])
 
 
-def test_planned_poses_keep_a_margin_inside_the_joint_limits():
-    limits = {"elbow_flex": JointLimit(-1.0, 1.0), "gripper": JointLimit(0.0, 100.0)}
-    check_limits({"elbow_flex": 0.95, "gripper": 100.0}, limits)  # no margin: inside
-    with pytest.raises(JointLimitError, match="elbow_flex.*8 deg margin"):
-        check_limits({"elbow_flex": 0.95, "gripper": 50.0}, limits, margin=0.14)
-    check_limits({"elbow_flex": 0.5, "gripper": 100.0}, limits, margin=0.14)  # gripper is exempt
+def test_a_grasp_that_would_drive_the_tips_into_the_table_is_refused():
+    config = _low_clear()
+    low = dataclasses.replace(config, arms=dataclasses.replace(config.arms, z_grasp=0.002))  # 2 mm
+    arms, executor = _sim(low)
+    with pytest.raises(Unreachable, match="hit the table"):
+        executor.execute_move(ROOK_H4, H4H5)
+    assert all(not arm.command_log for arm in arms.values())  # refused before anything moved

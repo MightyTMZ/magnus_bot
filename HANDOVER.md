@@ -91,19 +91,20 @@ base 0.078 + the arm falling 33 mm short (`arms.reach_correction`) + 2 mm right 
   With the margin, h3-h6 plan at <= 35 deg; a shallower grip (`--grip-depth-mm 15`, stem nearer the
   tips) allows z down to -12 at 30 deg. g-file 60/-9 still plans. Live g3g4 + g5g6 at 60/-9: OK.
 
-- **Root cause of the h4 stall (found by the new arrival check):** h3h4 at 30/-12/depth 15 faulted
-  "did not reach the pose before release (elbow -4.9 deg)", gripper untouched. LeRobot writes each
-  servo's calibrated range_min/max into the servo's own position limits; follower_1's elbow range
-  is +/-96.3 deg (LeRobot degrees: (ticks - mid) * 360/4095), but planning used the URDF limit
-  (112.6 deg as a servo angle). The place asked 100.3 deg. Planning (reach map + executor, live AND
-  sim) now uses `conventions.real_urdf_limits` (URDF limits narrowed to the calibrated ranges,
-  from ~/.cache/huggingface/lerobot/calibration/...; `MAGNUS_CALIBRATION_DIR` overrides; tests
-  use their own). Live refuses without the calibration. PLAN_LIMIT_MARGIN back to 2 deg (the
-  ranges are now exact hard stops). The 6/6 g-file setting (60 deg, pads) asked 97.8 deg and only
-  worked 1.5 deg short: it is now refused.
-- **One rook grasp for g, h and f4/f5 within the real ranges:** 25 deg, grip depth 10 mm (stem near
-  the tips), z -12..-9 (grip point 16-19 mm, the band that worked on g). Plans on g2-g7, h2-h7,
-  f4, f5. Not yet tried live.
+- **h3h4 at 30/-12/depth 15** faulted at the new arrival check: elbow 4.9 deg short of the h4 place
+  pose (gripper untouched). Cause: LeRobot writes each servo's calibrated range into the servo's
+  own position limits; follower_1's elbow stops at +/-96.3 deg (LeRobot degrees), the plan asked
+  100.3. Planning inside the calibrated ranges was tried and REVERTED at the operator's request:
+  it also refused the g-file setting that works (60 deg, pads, -9: asks 97.8, lands 1.5 deg short,
+  fine). Operator rule (2026-10-25): **the only motion-safety check to add is "the jaw tips never
+  hit the table"** (executor-wide `TABLE_CLEARANCE` 3 mm on the real tip height); no extra joint
+  margins. The arrival check before grip/release stays (it only stops a gripper action when the
+  arm is > 3 deg off; it is what turned the h4 drop into a hold).
+- **h3-h6 cannot take a level grasp from where follower_1 stands:** within the elbow's real stop
+  they allow at most ~27-37 deg (25 deg / stem 10 mm from the tips: h3->h4 1/1, picks from h4 0/3).
+  Tilting back toward the base hits the wrist stop; a riser does not help. Moving follower_1
+  ~6 cm further from the board would open h4/h5 at 50-70 deg (h3/h6 at ~3-4 cm), at the cost of
+  the d-file and e1/e8 for follower_1. Operator decision pending.
 
 ## Earlier session (2026-10-24, Alex + Claude, part 2) — reach probe, geometry calibrated
 - **Why:** after the live tuning run missed every time, the camera could only say "not picked".

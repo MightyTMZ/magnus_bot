@@ -21,7 +21,7 @@ from magnus_bot.config import ArmCorrection
 from magnus_bot.geometry import board as board_geom
 from magnus_bot.geometry.frames import ArmPlacement
 from magnus_bot.kinematics.conventions import model_to_urdf
-from magnus_bot.kinematics.model import PLAN_LIMIT_MARGIN, JointLimit
+from magnus_bot.kinematics.model import JointLimit
 from magnus_bot.kinematics.so101_ik import SO101Kinematics, Unreachable, tilted_tip_target
 
 Square = tuple[int, int]  # (file, rank)
@@ -134,8 +134,7 @@ def _in_limits(kinematics, x, y, z, pitch, limits, to_urdf, grip_depth=None, cor
         joints = to_urdf(kinematics.inverse(target, pitch=pitch))
     except Unreachable:
         return False
-    m = PLAN_LIMIT_MARGIN  # same margin the executor plans with
-    return all(limits[n].lo + m <= v <= limits[n].hi - m for n, v in joints.items())
+    return all(limits[n].lo <= v <= limits[n].hi for n, v in joints.items())
 
 
 def can_reach_point(

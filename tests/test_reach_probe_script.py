@@ -108,14 +108,13 @@ def test_live_refuses_an_unmeasured_rig(probe, config_dir, capsys):
     assert "live refused" in capsys.readouterr().err
 
 
-def test_live_stops_when_vision_is_down(probe, config_dir, capsys, lerobot_calibration):
+def test_live_stops_when_vision_is_down(probe, config_dir, capsys):
     argv = ["--live", "--config-dir", str(config_dir(measured=True)), "--vision-url", dead_url()]
     assert probe.main(argv, prompt=no_prompt) == 1
     assert "vision:" in capsys.readouterr().err
 
 
-def test_live_refuses_to_lower_the_jaws_onto_a_piece(probe, config_dir, vision_server, capsys,
-                                                     lerobot_calibration):
+def test_live_refuses_to_lower_the_jaws_onto_a_piece(probe, config_dir, vision_server, capsys):
     vision_server.reply = (200, BOARD_JSON)  # a rook on g3
     argv = ["--live", "--squares", "g3", "--config-dir", str(config_dir(measured=True)),
             "--vision-url", vision_server.url]
@@ -123,7 +122,7 @@ def test_live_refuses_to_lower_the_jaws_onto_a_piece(probe, config_dir, vision_s
     assert "clear g3 first" in capsys.readouterr().err
 
 
-def test_live_needs_a_typed_yes(probe, config_dir, vision_server, capsys, lerobot_calibration):
+def test_live_needs_a_typed_yes(probe, config_dir, vision_server, capsys):
     vision_server.reply = (200, {**BOARD_JSON, "occupancy": {}, "pieces": {}})
     argv = ["--live", "--squares", "g3", "--config-dir", str(config_dir(measured=True)),
             "--vision-url", vision_server.url]

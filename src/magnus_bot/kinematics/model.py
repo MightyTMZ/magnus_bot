@@ -16,7 +16,6 @@ pitfall documented in docs/joint_conventions.md; do not trust these numbers for 
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 
 # Order matches LeRobot's bus definition. ``gripper`` is last and handled separately from IK.
@@ -50,13 +49,6 @@ class JointLimit:
     lo: float
     hi: float
 
-
-# Planned arm poses must keep this far inside every arm joint's limit (rad; not the gripper).
-# 2026-10-25 live: a place on h4 asked the elbow for 100 deg; its servo's calibrated range ends at
-# 96.3 deg, so it stalled short, the arm stayed high and too far out, and the rook dropped onto the
-# g-file. Live planning now uses the calibrated ranges (conventions.calibrated_range), which are
-# the servos' own hard stops, so the margin only covers settling slack.
-PLAN_LIMIT_MARGIN = math.radians(2.0)
 
 
 @dataclass(frozen=True)

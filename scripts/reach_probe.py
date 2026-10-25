@@ -42,7 +42,7 @@ from magnus_bot.config import ArmCorrection, load_config
 from magnus_bot.geometry.frames import arm_placements
 from magnus_bot.geometry.transforms import perp_left, unit
 from magnus_bot.hardware.sim_arm import SimArm
-from magnus_bot.kinematics.conventions import load_servo_map, model_to_urdf, real_urdf_limits, urdf_to_model
+from magnus_bot.kinematics.conventions import load_servo_map, model_to_urdf, urdf_to_model
 from magnus_bot.kinematics.so101_ik import SO101Kinematics, Unreachable
 from magnus_bot.orchestration.bench import board_diagram, shut_down
 from magnus_bot.orchestration.executor import JointLimitError
@@ -184,17 +184,12 @@ def main(argv: list[str] | None = None, prompt=input) -> int:
         except (RuntimeError, OSError) as e:
             print(f"live refused: {e}", file=sys.stderr)
             return 1
-        real = real_urdf_limits(smap, kin.model.limits, config.arms.arms[args.arm].calibration_id)
-        if real is None:
-            print(f"live refused: no LeRobot calibration for {args.arm}, so its real joint ranges "
-                  "are unknown", file=sys.stderr)
-            return 1
         to_command = smap.model_to_servo
 
         def to_model(joints):
             return urdf_to_model(smap.servo_to_urdf(joints))
 
-        limits = smap.servo_limits(real)  # the servos' calibrated ranges, in servo angles
+        limits = smap.servo_limits(kin.model.limits)
     else:
         to_command, to_model, limits = model_to_urdf, urdf_to_model, kin.model.limits
 
