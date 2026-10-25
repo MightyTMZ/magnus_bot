@@ -5,8 +5,9 @@
 ## Mission
 Two SO-101 follower arms (LeRobot, Feetech STS3215) automate the opponent in a physical chess
 game against a human. The arms cooperate through a handoff pad, orchestrated by a state machine.
-Current scope: controller, IK, planning, orchestration. No frontend/backend. Computer vision is
-an interface stub only. The robots play **White** and move first; the human plays **Black** and
+Current scope: controller, IK, planning, orchestration. No frontend/backend. Computer vision runs
+as a separate local service (`RF-DETR/vision_server.py`, own venv) that the core reads over
+localhost; it grades robot transfers today. The robots play **White** and move first; the human plays **Black** and
 sits at the rank-8 edge (`human_color: black`, flippable).
 
 ## Frames and orientation facts (source of truth: docs/frames.md)
@@ -39,10 +40,12 @@ sits at the rank-8 edge (`human_color: black`, flippable).
 - `src/magnus_bot/motion/` — safety clamps, pick/place primitives, min-jerk trajectory.
 - `src/magnus_bot/hardware/` — `Arm` protocol, `SimArm` (full), `LeRobotArm` (stub).
 - `src/magnus_bot/planning/` — move decomposition, arm assignment, handoff.
-- `src/magnus_bot/orchestration/` — state machine (pure), executor.
+- `src/magnus_bot/orchestration/` — state machine (pure), executor, closed-loop grasp tuning.
 - `src/magnus_bot/sources/` — Stockfish / CLI / RandomLegal / BoardSource (vision stub).
-- `src/magnus_bot/vision/` — Camera protocol + OpenCV stub, homography stub.
-- `scripts/` — reach_report, jog_arm, demo_single_move, calibrate_board, hardware_selftest.
+- `src/magnus_bot/vision/` — stdlib client for the vision server, transfer grading
+  (`verify.py`), `SimulatedBoard`; plus the old in-process Camera/homography stubs.
+- `RF-DETR/` — vision service + calibration (its own venv `RF-DETR/.venv`; torch+CUDA).
+- `scripts/` — reach_report, jog_arm, first_move, tune_grasp, calibrate_board, hardware_selftest.
 - `hardware/` — reference calibration + example self-test outputs (folded from arm_test).
 - `tests/`, `docs/`.
 

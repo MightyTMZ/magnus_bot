@@ -14,6 +14,9 @@ Modes:
 
     <core-venv>/python scripts/first_move.py            # sim pass (expect OK)
     <lerobot-venv>/python scripts/first_move.py --live  # real move (operator approval)
+
+Grasp: the rook's tuned tilt + height from configs/grasp.yaml when present (written by
+scripts/tune_grasp.py --save), else 20 deg and the measured grasp_height. --pitch overrides the tilt.
 """
 
 from __future__ import annotations
@@ -36,6 +39,7 @@ from magnus_bot.kinematics.so101_ik import SO101Kinematics
 ARM = "follower_1"
 PIECE = "rook"
 HOVER = 0.06  # low first-move hover (m); full z_clear needs the tilt work
+DEFAULT_PITCH_DEG = 20.0  # until the rook's grasp is tuned (configs/grasp.yaml)
 SERVO_MAP = Path(__file__).resolve().parents[1] / "hardware" / "servo_maps" / f"{ARM}.json"
 
 
@@ -43,11 +47,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="First single-arm move (default g3g4, follower_1).")
     parser.add_argument("--live", action="store_true", help="drive the real arm (gated)")
     parser.add_argument("--uci", default="g3g4", help="the move, e.g. g3g4 or f3f4")
-    parser.add_argument("--pitch", type=float, default=20.0,
-                        help="tool tilt from vertical in DEGREES (0 = top-down; rook grips better tilted)")
+    parser.add_argument("--pitch", type=float, default=None,
+                        help="tool tilt from vertical in DEGREES (default: the rook's tuned grasp, else 20)")
     parser.add_argument("--config-dir", default=None)
     args = parser.parse_args(argv)
-    pitch = math.radians(args.pitch)
 
     # Import the executor lazily so --sim never pulls anything hardware-adjacent unexpectedly.
     from magnus_bot.orchestration.executor import Executor, build_move_program
@@ -57,8 +60,10 @@ def main(argv: list[str] | None = None) -> int:
     dst = (chess.square_file(mv.to_square), chess.square_rank(mv.to_square))
 
     config = load_config(args.config_dir)
-    # Rook grasp height (fingertip target) for every square, and the low first-move hover.
-    z_grasp = config.board.grasp_height.get(PIECE, config.arms.z_grasp)
+    # Rook grasp (tilt + fingertip height): tuned if tune_grasp.py --save ran, else measured. Low hover.
+    tuned_pitch, z_grasp = config.grasp_for(PIECE, default_pitch=math.radians(DEFAULT_PITCH_DEG))
+    pitch = math.radians(args.pitch) if args.pitch is not None else tuned_pitch
+    source = "--pitch" if args.pitch is not None else ("tuned" if PIECE in config.grasp_tuning else "default")
     config = dataclasses.replace(
         config, arms=dataclasses.replace(config.arms, z_grasp=z_grasp, z_clear=HOVER)
     )
@@ -72,13 +77,13 @@ def main(argv: list[str] | None = None) -> int:
     for sq in (src, dst):
         if not rmap.can_reach(ARM, *sq):
             print(f"{ARM} cannot reach {chess.square_name(chess.square(*sq))} at grasp "
-                  f"{z_grasp} m / hover {HOVER} m / pitch {args.pitch} deg", file=sys.stderr)
+                  f"{z_grasp} m / hover {HOVER} m / pitch {math.degrees(pitch):g} deg", file=sys.stderr)
             return 1
 
     board = chess.Board(None)
     board.set_piece_at(mv.from_square, chess.Piece(chess.ROOK, chess.WHITE))
     program = build_move_program(board, mv, rmap, config)
-    label = f"{args.uci} @ {args.pitch:.0f} deg tilt"
+    label = f"{args.uci} @ {math.degrees(pitch):g} deg tilt ({source}), grasp z {z_grasp * 1000:.1f} mm"
 
     if not args.live:
         arms = {a: SimArm(a) for a in config.arms.arms}

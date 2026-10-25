@@ -5,8 +5,9 @@ Keep it under ~200 lines by summarizing old entries. Never delete decisions — 
 
 ## Status
 Milestone **M0 (scaffold + tests green)**: COMPLETE. No hardware has been driven by magnus_bot
-code yet. **116 tests pass, 1 skip** (placo cross-check, needs the `ik` env); ruff clean on
-`src/ tests/ scripts/` (`RF-DETR/` has 7 lint findings).
+code yet. **183 tests pass, 1 skip** (placo cross-check, needs the `ik` env; a working copy with
+`measured: true` also fails `test_packaged_config_loads_unmeasured` — expected); ruff clean on
+`src/ tests/ scripts/` (the teammates' `RF-DETR/` scripts still have lint findings).
 **M1 Phase 0 (2026-10-24):** 0a env built (lerobot + serial-motors + magnus_bot[hardware] in
 `C:\projects\lerobot\.venv`). 0b done (URDF link lengths in `SO101Model`; nominal limits in
 docs/joint_conventions.md). 0c partial: recorded square 0.057, gap 0.067, z_grasp 0.028 (pawn),
@@ -37,8 +38,47 @@ First live move will use **follower_1** (clean map, reaches files f–h).
 top-down can't hover at 14 cm): `--sim` planned+executed clean (8 phases, back to rest). `--live`
 is written + gated (needs `measured: true` + follower_1 servo map + operator). REMAINING for live:
 flip `measured: true`, start follower_1 from a safe near-board pose, run `--live` with approval.
+**Vision online + closed tuning loop (2026-10-24):** the teammates' local RF-DETR runs on the RTX
+5050 (~25 fps) behind `RF-DETR/vision_server.py`; the arm side reads the board over localhost,
+grades every transfer and sweeps grasp settings (`scripts/tune_grasp.py`). Sim-verified end to
+end; real camera link verified from the lerobot venv. **Not yet run live** (next step 0).
 
-## Last session (2026-10-24, Alex + Claude) — real motion + tilted-tool IK + collision
+## Last session (2026-10-24, Alex + Claude) — vision online, closed grasp-tuning loop
+- **Why:** live grasps kept missing (g3g4 at 20° tilt failed twice) and every miss had to be
+  reported by hand. Now the camera grades each attempt and the arm re-tries / resets on its own.
+- **Feed:** iPhone via iVCam = DirectShow index 0. Frames are rotated 90° CW then cropped
+  (`board.prep_frame()`, used by `Calibrate.py`, `Chessdetect.py`, `vision_server.py`);
+  `Calibrate.py` drags the crop (`crop.json`) then clicks a8→h8→h1→a1 (`corners.json`, paths
+  anchored to `RF-DETR/`). Recalibrated + homography-checked (corners→right squares, centre→d4).
+- **Local inference (teammates, `0139125`):** `Chessdetect.py` now runs RF-DETR Small locally
+  (`RF-DETR/model/weights_2.0.pt`, from HuggingFace, not in git) — no Roboflow key/network.
+  `RF-DETR/.venv` (uv, py3.13): GUI `opencv-python`, `rfdetr`, `supervision`, `python-chess`,
+  **torch 2.14.1+cu130** (torch 2.14.1 is only on the cu126/cu130 indexes; cu130 has Blackwell
+  sm_120). The lerobot venv's cv2 is headless, so GUI scripts must use `RF-DETR/.venv`.
+- **Two processes (see Decisions):** `RF-DETR/vision_server.py` owns the camera + warm model and
+  serves `/board` (`?fresh=1` waits for N identical readings ALL taken after the request, so a
+  read never returns a pre-move board and naturally waits out arm occlusion). Core side, stdlib
+  only: `vision/observation.py` (`HttpBoardReader`), `vision/verify.py` (`check_transfer`:
+  success / not_picked / lost / misplaced / disturbed / unclear), `vision/sim_board.py`.
+- **Tuning loop:** `orchestration/tuning.py` + `scripts/tune_grasp.py`. One command runs the whole
+  sweep unattended. The piece shuttles g3→g4→g3… (each success resets the next try);
+  `not_picked` retries, and a setting that misses 3 in a row is given up as bad. After 3 give-ups
+  in a row, a setting that already worked is re-tried once (the **probe**): still works → carry on
+  unattended; fails → ask the operator (piece lying down? gripper?). Any other outcome holds the
+  arm and asks. Each setting is planned both ways before motion (85° refused with the real
+  joint-limit reason). JSONL log per attempt in `hardware/tuning_logs/` (gitignored).
+- **Search + save:** `--search --pitch-range 20,40 [--z-range=-5,10]` = 5 coarse values (middle
+  first), then halve the step around the winner down to 1°/1 mm (tilt, then height at the winning
+  tilt). `--save` re-tests the winner with `--confirm 10` fresh attempts and writes it to
+  `configs/grasp.yaml` only if ≥ `--min-success 0.9` pass; `Config.grasp_for(piece)` reads it and
+  `first_move.py` uses it by default (`--pitch` overrides). `--sim-good-pitch 27,34` gives sim a
+  failure window to dry-run the search (it converges on 30°, confirms 10/10, saves).
+- Core `.venv` had lost its editable `magnus_bot` install (deps only); restored with the
+  documented `uv pip install --python .venv -e ".[dev]"`. The lerobot venv's install is editable.
+- Tests: +46 (verify, observation client vs a stand-in server, tuning state machine, the script
+  incl. live preflight refusals). Server freshness/stability checked against the production code.
+
+## Earlier session (2026-10-24, Alex + Claude) — real motion + tilted-tool IK + collision
 - **First real motion:** both arms via `scripts/hardware_selftest.py` — read-only `baseline` OK,
   gentle `test` PASS 12/12 (each joint nudged ~8° and returned <0.4°). Physical chain confirmed
   (power/USB/LeRobot/calibration). LeRobot's `max_relative_target` clamp fires on `wrist_flex` at
@@ -85,24 +125,12 @@ flip `measured: true`, start follower_1 from a safe near-board pose, run `--live
   at the rig's z_clear the map is empty. Findings in Known issues: REACH.
 
 ## Other workstreams (not integrated with src/magnus_bot yet)
-- **`RF-DETR/` (Aurick): working standalone vision loop.** Webcam -> Roboflow hosted model
-  `chess-full-kntuv/1` (cloud, `ROBOFLOW_API_KEY`, every 0.5 s) -> homography from 4 clicked
-  corners (`Calibrate.py` -> `corners.json`, click order puts a8 top-left) -> per-square W/B
-  occupancy -> 3 stable frames -> `find_move` picks the legal move best matching occupancy.
-  Gaps: color-only so promotions are ambiguous (e7e8q vs e7e8n); keeps its OWN `chess.Board`;
-  Windows-only (`CAP_DSHOW`); must run from `RF-DETR/`; deps not in `pyproject.toml`; does not
-  use the `vision/` / `BoardSource` interfaces; arms will occlude it mid-move.
-  - **2026-10-24 (feed online, Alex + Claude):** webcam is now an **iPhone via iVCam**
-    (DirectShow index **0**; confirmed by name with pygrabber). RF-DETR's packaged cv2 (in
-    the lerobot venv) is **headless** — no `imshow` — so a dedicated **GUI vision venv** was
-    built at `RF-DETR/.venv` (uv, py3.13, full `opencv-python` cv2 5.0.0). Use that venv for
-    `camera.py` / `Calibrate.py` / `Chessdetect.py`. Added a shared `board.prep_frame()` that
-    **rotates 90° CW then crops** every frame (phone mounted sideways; crop trims margin);
-    `Calibrate.py` drags the crop (→ `crop.json`) and clicks a8→h8→h1→a1 (→ `corners.json`),
-    and `Chessdetect.py` applies the same `prep_frame` before inference so both share one
-    coord space. Calibrated + homography-validated (corners→correct squares, center→d4).
-    STILL stubbed for the full read: `supervision`+`inference_sdk`+`python-dotenv` not yet in
-    `RF-DETR/.venv`, and no `.env`/`ROBOFLOW_API_KEY` yet.
+- **`RF-DETR/` (Aurick + team): vision.** `Chessdetect.py` = the standalone game viewer (local
+  RF-DETR -> per-square W/B -> 3 stable frames -> `find_move`, its OWN `chess.Board`).
+  `vision_server.py` + `detector.py` = the arm-facing service (see Last session). Gaps:
+  game-move input (`BoardSource`) still unwired; `CLASS_NAMES`/weights are duplicated in
+  `detector.py` and `Chessdetect.py` (keep in sync until Chessdetect imports `detector`);
+  RF-DETR deps live in `RF-DETR/.venv`, not `pyproject.toml`; Windows-only (`CAP_DSHOW`).
 - **`chess_com/magnus_bot/` (Tom): Next.js 16 + Steel cloud browser on chess.com.** Polls the
   page URL every 3 s (a fresh CDP connect per poll) to detect a game/bot page; "Abandon" and
   "Go to live game" buttons; board view is a placeholder. No move read/write, no link to
@@ -110,6 +138,20 @@ flip `measured: true`, start follower_1 from a safe near-board pose, run `--live
   frontend/backend") — team to decide (Open questions).
 
 ## Next steps (ordered)
+0. **Run the closed tuning loop live (Alex, rig).** Rook on g3, g4 empty, follower_1 at a safe
+   near-board pose that does NOT hide g3/g4 from the camera. Terminal 1:
+   `RF-DETR/.venv/Scripts/python.exe RF-DETR/vision_server.py --show`. Terminal 2 (lerobot venv):
+   `scripts/tune_grasp.py --check-vision`, then
+   `scripts/tune_grasp.py --live --search --pitch-range 20,40 --z-range=-4,8 --save`. Commit the
+   resulting `configs/grasp.yaml` (it is tuned config, like the servo maps) and record the winner
+   + its confirmation here. JSONL logs stay local (`hardware/tuning_logs/` is gitignored).
+   Then the per-piece / whole-board roadmap below (step 0b).
+0b. **Every piece, every square (roadmap, see Decisions 2026-10-24 "factorize").** (1) tune each
+   piece type's grasp on one easy square pair; (2) have the vision server report piece POSITIONS
+   (board mm, not just squares) and fit a per-arm kinematic calibration from placement errors;
+   (3) self-resetting board tours that grade every square per arm, with bystanders; (4) the pad
+   handoff, captures and transit at full z_clear; (5) grade every real game move
+   (`check_board_move`) and refit as data accumulates.
 1. **M1 1b — URDF zero -> servo (Alex, rig, read-only, both arms).** Power-cycle (torque
    off), then run `scripts/joint_zero_check.py --arm follower_1` (and `follower_2`) in the
    lerobot env. It prints every pose and nudge direction. URDF zero is an **"L"**, NOT a
@@ -131,8 +173,9 @@ flip `measured: true`, start follower_1 from a safe near-board pose, run `--live
    min-jerk descent strays ~3.5 mm); (c) re-plan the handoff pad (still no point reachable by both
    arms; risers help — `reach_report.py --riser 0.06`).
 5. Replace the BIN/STASH "any arm" assumption in `planning/assigner.py` with measured reach.
-6. M4: wrap `RF-DETR/` behind `BoardSource` so the orchestrator owns game state and reads the
-   camera only when both arms are at rest.
+6. M4: `BoardSource` (the human's move from the camera). The pieces now exist: read with
+   `HttpBoardReader`, diff with `vision.verify.expected_occupancy` / `check_board_move`, read
+   only when both arms are at rest. Also verify each ROBOT move with `check_board_move`.
 
 ## Open questions (for the operator / team)
 - Done 2026-10-24: square 0.057, gap 0.067, z_grasp 0.028 (pawn), king 0.099, z_clear 0.140;
@@ -171,8 +214,32 @@ flip `measured: true`, start follower_1 from a safe near-board pose, run `--live
   executor composes them (~per-square pitch + 6 grips), never a per-(piece×square) table.
 - 2026-10-24: Piece-collision is checked at EXECUTION time against the live board
   (`motion/collision.py`), not baked into the static reach map (occupancy changes every move).
+- 2026-10-24: Vision runs as its OWN process (`RF-DETR/vision_server.py`, RF-DETR venv) and is
+  read over localhost HTTP. Reason: RF-DETR needs torch 2.14 + CUDA, lerobot pins `torch<2.12`;
+  one process also must own the camera. The core client stays stdlib-only.
+- 2026-10-24: Transfers are graded on OCCUPANCY (W/B/?), never piece type — the detector's types
+  are unreliable (it reported two white kings). Only `not_picked` (board unchanged) is retried
+  automatically; every other outcome holds the arm and asks the operator.
+- 2026-10-24: The tuning reach map contains only the driven arm, so the assigner cannot hand a
+  move to the other (unconnected) arm at steep tilts. (`first_move.py` lacks this guard.)
+- 2026-10-24: Tuning picks the MOST ROBUST top scorer: highest (successes+1)/(attempts+2), then
+  the largest distance to any worse setting (the edge of what was tried counts as unknown), then
+  the smaller tilt. Supersedes "ties → smaller tilt" for TUNING only (the reach-map "lean as
+  little as possible" policy stands): an edge winner fails at the first wobble. A winner is saved
+  only after fresh confirmation attempts (selection on few noisy trials inflates its score).
+- 2026-10-24: Tuned grasps live in machine-written `configs/grasp.yaml` (per piece: tilt + offset
+  on the measured grasp_height), never in hand-commented board.yaml.
+- 2026-10-24 ("factorize"): reaching every square with every piece is NOT a 6×64×2 table of tuned
+  moves. Grip is per PIECE (tuned once each); placement accuracy is per ARM (a kinematic
+  calibration fitted from camera-measured errors, which generalizes to untested squares); the
+  executor composes them, as the 2026-10-24 tilt decision already said.
 
 ## Known issues
+- **Vision limits (2026-10-24, open).** Piece TYPES are unreliable (use colors). Occupancy cannot
+  tell a standing piece from one knocked over in place (reads as present; repeated `not_picked`
+  on the next try is the symptom, hence the 3-misses stop). The arm's rest pose must leave the
+  tested squares visible, or reads time out / report `lost`. Only one process can hold the
+  camera: stop `Chessdetect.py` before `vision_server.py`.
 - **REACH (2026-10-24, open, blocking).** Updated after step 1a (shoulder offset + URDF
   limits, top-down IK, elbow up):
   - At grasp height (2.8 cm): **48/64** squares commandable (a–c / f–h files, fewer near the corners, plus d/e on
@@ -247,3 +314,9 @@ TWO separate environments — the core never imports lerobot (keeps sim/tests po
 - Dry-run a move program: `python scripts/demo_single_move.py --uci e2e4`
 - Sim-execute a move: `Executor(..., simulate=True)` with a feasible `z_clear` (see tests/test_executor.py `_low_clear`)
 - LIVE self-test (moves an arm; needs approval): see `scripts/hardware_selftest.py` header.
+- Vision: `RF-DETR/.venv/Scripts/python.exe RF-DETR/vision_server.py --show` (stop Chessdetect
+  first) · link check from any venv: `scripts/tune_grasp.py --check-vision` · recalibrate:
+  `RF-DETR/.venv/Scripts/python.exe RF-DETR/Calibrate.py`.
+- Grasp tuning: sim dry run `python scripts/tune_grasp.py --search --sim-good-pitch 27,34` · live
+  `--live --search --pitch-range 20,40 --save` (lerobot venv, vision server running, type "yes") ·
+  fixed grid instead: `--pitches 25,30,35 [--z-offsets 0,5]`.

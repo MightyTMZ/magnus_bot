@@ -10,8 +10,9 @@ Never read a test's expected value from these files: tests construct their own g
 
 from __future__ import annotations
 
+import math
 import warnings
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,14 @@ import yaml
 DEFAULT_CONFIG_DIR = Path(__file__).resolve().parents[2] / "configs"
 
 PIECE_TYPES = ("pawn", "knight", "bishop", "rook", "queen", "king")
+
+GRASP_FILE = "grasp.yaml"  # optional, machine-written by scripts/tune_grasp.py --save
+GRASP_HEADER = """\
+# Grasp settings found by closed-loop tuning. Written by `scripts/tune_grasp.py --save`.
+# pitch_deg: tool tilt from vertical. z_offset_mm: added to board.yaml grasp_height[piece].
+# confirmed: fresh trials that passed at this setting before it was saved.
+# Read by Config.grasp_for (first_move.py uses it). Delete a piece's entry to go back to untuned.
+"""
 
 
 @dataclass(frozen=True)
@@ -73,12 +82,33 @@ class HandoffConfig:
 
 
 @dataclass(frozen=True)
+class TunedGrasp:
+    """A grasp found by closed-loop tuning for one piece type."""
+
+    pitch_deg: float
+    z_offset_mm: float = 0.0
+    confirmed: str = ""  # e.g. "10/10"
+    tuned_on: str = ""  # e.g. "follower_1 g3g4"
+    date: str = ""
+
+
+@dataclass(frozen=True)
 class Config:
     measured: bool
     board: BoardConfig
     arms: ArmsConfig
     handoff: HandoffConfig
     source_dir: Path = field(default=DEFAULT_CONFIG_DIR)
+    grasp_tuning: dict[str, TunedGrasp] = field(default_factory=dict)  # from grasp.yaml
+
+    def grasp_for(self, piece: str, default_pitch: float = 0.0) -> tuple[float, float]:
+        """``(pitch rad, fingertip z m)`` for ``piece``: its tuned grasp if one was saved, else the
+        measured ``grasp_height`` with ``default_pitch``."""
+        z = self.board.grasp_height.get(piece, self.arms.z_grasp)
+        tuned = self.grasp_tuning.get(piece)
+        if tuned is None:
+            return default_pitch, z
+        return math.radians(tuned.pitch_deg), z + tuned.z_offset_mm / 1000.0
 
     def require_measured(self) -> None:
         """Raise unless the rig has been measured. Call before any live motion."""
@@ -147,7 +177,19 @@ def load_config(config_dir: str | Path | None = None) -> Config:
         arms=arms,
         handoff=handoff,
         source_dir=config_dir,
+        grasp_tuning=_load_grasp_tuning(config_dir / GRASP_FILE),
     )
+
+
+def save_tuned_grasp(config_dir: str | Path, piece: str, tuned: TunedGrasp) -> Path:
+    """Write ``tuned`` as ``piece``'s entry in ``config_dir/grasp.yaml`` (other pieces kept)."""
+    if piece not in PIECE_TYPES:
+        raise ValueError(f"unknown piece {piece!r}; expected one of {PIECE_TYPES}")
+    path = Path(config_dir) / GRASP_FILE
+    data = (yaml.safe_load(path.read_text()) or {}) if path.is_file() else {}
+    data[piece] = asdict(tuned)
+    path.write_text(GRASP_HEADER + yaml.safe_dump(data, sort_keys=True))
+    return path
 
 
 # --- helpers ---------------------------------------------------------------
@@ -179,6 +221,27 @@ def _edge_gap(arms_raw: dict[str, Any], arm_specs: dict[str, Any]) -> dict[str, 
         return {str(k): float(v) for k, v in raw.items()}
     gap = float(raw)
     return {arm_id: gap for arm_id in arm_specs}
+
+
+def _load_grasp_tuning(path: Path) -> dict[str, TunedGrasp]:
+    """Tuned grasps from the optional grasp.yaml; missing or empty file -> no tuning."""
+    if not path.is_file():
+        return {}
+    data = yaml.safe_load(path.read_text()) or {}
+    if not isinstance(data, dict):
+        raise ValueError(f"{path} must contain a YAML mapping, got {type(data).__name__}")
+    tuned = {}
+    for piece, entry in data.items():
+        if piece not in PIECE_TYPES:
+            raise ValueError(f"{path}: unknown piece {piece!r}; expected one of {PIECE_TYPES}")
+        tuned[piece] = TunedGrasp(
+            pitch_deg=_float(entry, "pitch_deg"),
+            z_offset_mm=float(entry.get("z_offset_mm", 0.0)),
+            confirmed=str(entry.get("confirmed", "")),
+            tuned_on=str(entry.get("tuned_on", "")),
+            date=str(entry.get("date", "")),
+        )
+    return tuned
 
 
 def _pose(d: dict[str, Any]) -> Pose:
