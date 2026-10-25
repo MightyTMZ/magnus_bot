@@ -43,6 +43,8 @@ z_correction:       # the arm sits this much LOWER than the model
 square_nudge_mm:
   follower_1:
     f7: [4, -4]  # 2026-10-25: the queen landed short and left of f7 (Qxf7); operator: front-right
+    e3: [0, 2]   # 2026-10-25: picking the queen off the pad (Qh5 leg 2): 2 mm more on top of the
+                 # queen's h5 offset (6 -> 8 mm at e3; h5 keeps 6)
 
 grasp_side_offset:
   follower_1: 0.003

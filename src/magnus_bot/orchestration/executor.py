@@ -91,6 +91,7 @@ GRIPPER_PHASES = (Phase.GRIP, Phase.RELEASE)
 # than faulting), and it pauses after the gripper closes / opens so the piece is held / let go.
 UP_PHASES = (Phase.LIFT, Phase.RETRACT)
 REAR_MARGIN = math.radians(10.0)  # rearing the elbow off the pad stops this short of its limit
+REAR_LEAN = math.radians(45.0)  # ...while the shoulder leans back this much, in the same motion
 GRIPPER_DWELL = 0.1  # s (0.3 looked stalled, operator 2026-10-25)
 DWELL = "dwell"
 
@@ -289,6 +290,14 @@ def _eased(choice: GraspChoice, tip_to_pad: float) -> list[GraspChoice]:
     return out
 
 
+def _toward_limit(value: float, direction: float, joint: str, limits, stops) -> float:
+    """``joint``'s limit in ``direction`` (the tighter of URDF and servo stop), REAR_MARGIN inside."""
+    edge = limits[joint].hi if direction > 0 else limits[joint].lo
+    if stops and joint in stops:
+        edge = min(edge, stops[joint].hi) if direction > 0 else max(edge, stops[joint].lo)
+    return edge - direction * REAR_MARGIN
+
+
 def _arm_waypoints(arm_steps, config, home, placement, kinematics, limits, to_command, choice, piece,
                    stops=None):
     """Joint waypoints (rest first and last) for one transfer with one grasp ``choice``."""
@@ -377,18 +386,23 @@ def _arm_waypoints(arm_steps, config, home, placement, kinematics, limits, to_co
         except JointLimitError as exc:
             raise JointLimitError(f"{where}: {exc} [{choice.label}]") from exc
         if step.phase == Phase.RETRACT and arm_steps.transfer.dst.kind == PAD:
-            # Off the pad (far reach for both arms): REAR THE ELBOW all the way up (REAR_MARGIN short
-            # of its stop), shoulder and wrist held, so the gripper is ~33 cm up before the arm moves
-            # back at all. A plain retract let the lagging elbow drop the jaws into the piece just
-            # placed, on the way up and on the way back (2026-10-25, the bishop on e3).
+            # Off the pad (far reach for both arms), in ONE motion: rear the elbow all the way up
+            # (REAR_MARGIN short of its stop) while the shoulder leans back REAR_LEAN, wrist held; and
+            # END there, high (~35 cm) just off the arm's own side: never unfold back over the board.
+            # 2026-10-25: a plain retract, then a rear followed by a separate lean-and-unfold, each let
+            # a lagging joint swing the gripper back down onto the piece just placed on e3. Together,
+            # a slow shoulder only means the elbow goes up first: the safe order.
             released = waypoints[-1]
             up = 1.0 if command["elbow_flex"] > released["elbow_flex"] else -1.0  # the retract raises it
-            edge = limits["elbow_flex"].hi if up > 0 else limits["elbow_flex"].lo
-            if stops and "elbow_flex" in stops:
-                stop = stops["elbow_flex"]
-                edge = min(edge, stop.hi) if up > 0 else max(edge, stop.lo)
-            command = {**command, "elbow_flex": edge - up * REAR_MARGIN, "wrist_flex": released["wrist_flex"]}
-            reared = command
+            reared = {**command, "wrist_flex": released["wrist_flex"],
+                      "elbow_flex": _toward_limit(command["elbow_flex"], up, "elbow_flex", limits, stops)}
+            ahead = via(arm_steps.steps[-1].xyz[:2], gripper)  # which way "back" is for the shoulder
+            if ahead is not None:
+                back = 1.0 if ahead["shoulder_lift"] > command["shoulder_lift"] else -1.0
+                lean = command["shoulder_lift"] + back * REAR_LEAN
+                edge = _toward_limit(lean, back, "shoulder_lift", limits, stops)  # never past the limit
+                reared["shoulder_lift"] = min(lean, edge) if back > 0 else max(lean, edge)
+            command = reared
         past = {n: math.degrees(max(stops[n].lo - v, v - stops[n].hi)) for n, v in command.items()
                 if stops and n in stops and not stops[n].lo - STOP_SLACK <= v <= stops[n].hi + STOP_SLACK}
         if past:
@@ -399,19 +413,9 @@ def _arm_waypoints(arm_steps, config, home, placement, kinematics, limits, to_co
                       else "near")
         if step.phase in UP_PHASES:  # up first: no sideways move before the arm is really up
             checkpoints.append((len(waypoints) - 1, step.phase.value))
+    if reared is not None:
+        return waypoints, checkpoints, travel  # off the pad: end reared up, off the arm's own side
     if (end := via(arm_steps.steps[-1].xyz[:2], gripper)) is not None:
-        if reared is not None:
-            # From the reared pose: lean the shoulder back (and turn) with the elbow STILL folded up,
-            # settle, THEN unfold. Together, the quick elbow unfolded before the slow shoulder leaned
-            # back and swung the gripper straight back down onto the pad (2026-10-25).
-            lean = {**reared, "shoulder_pan": end["shoulder_pan"], "shoulder_lift": end["shoulder_lift"]}
-            try:
-                check_limits(lean, limits)
-                waypoints.append(lean)
-                travel.append("travel")
-                checkpoints.append((len(waypoints) - 1, Phase.RETRACT.value))  # settle before unfolding
-            except JointLimitError:
-                pass
         waypoints.append(end)  # after the place: already up; now back toward the arm and STAY up
         travel.append("travel")
         return waypoints, checkpoints, travel

@@ -421,10 +421,11 @@ def test_a_lift_that_settles_a_little_off_does_not_stop_the_move(monkeypatch):
     assert ("lift", False) in calls and ("retract", False) in calls
 
 
-def test_after_rearing_off_the_pad_the_shoulder_leans_back_before_the_elbow_unfolds(config_dir):
-    # 2026-10-25: unfolding together, the quick elbow beat the slow shoulder and swung the gripper
-    # back down onto the pad. The plan holds the elbow folded until the shoulder is back.
+def test_off_the_pad_the_arm_rears_and_leans_back_in_one_motion_and_stays_up(config_dir):
+    # 2026-10-25: a rear, then a separate lean-and-unfold, let the quick elbow swing the gripper back
+    # down onto the bishop on e3. Now one motion (elbow up + shoulder back), ending high off the board.
     from magnus_bot.config import TunedGrasp, save_tuned_grasp
+    from magnus_bot.orchestration.executor import REAR_LEAN
 
     cfg_dir = config_dir(measured=False)
     save_tuned_grasp(cfg_dir, "bishop", TunedGrasp(pitch_deg=40.0, z_offset_mm=0.0))
@@ -437,8 +438,10 @@ def test_after_rearing_off_the_pad_the_shoulder_leans_back_before_the_elbow_unfo
     board = chess.Board("rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2")
     to_pad = build_move_program(board, chess.Move.from_uci("f1c4"), rmap, config)[0]
     traj = executor.plan([to_pad])[0]
-    rear_at, lean_at = [i for i, phase in traj.checkpoints if phase == "retract"]
-    reared, lean, end = traj.samples[rear_at], traj.samples[lean_at], traj.samples[-1]
-    assert lean["elbow_flex"] == pytest.approx(reared["elbow_flex"])  # still folded up...
-    assert lean["shoulder_lift"] == pytest.approx(end["shoulder_lift"])  # ...once the shoulder is back
-    assert end["elbow_flex"] != pytest.approx(reared["elbow_flex"])  # only then does it unfold
+    gates = {phase: i for i, phase in traj.checkpoints if phase != "dwell"}
+    assert gates["retract"] == len(traj.samples) - 1  # the reared pose is where the move ends
+    released, end = traj.samples[gates["release"]], traj.samples[-1]
+    assert abs(end["shoulder_lift"] - released["shoulder_lift"]) > REAR_LEAN * 0.8  # leaned back...
+    assert end["wrist_flex"] == pytest.approx(released["wrist_flex"])  # ...wrist held, in one go
+    pts = SO101Kinematics().link_points(urdf_to_model(end))
+    assert min(p[2] for p in pts[2:]) > 0.30  # the whole gripper ends > 30 cm up
