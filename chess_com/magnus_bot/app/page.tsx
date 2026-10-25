@@ -15,6 +15,9 @@ export default function Home() {
   const [showBoardView, setShowBoardView] = useState(false);
   const [showAbandonConfirm, setShowAbandonConfirm] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const monitorRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [moves, setMoves] = useState<string[]>([]);
+  const [monitoring, setMonitoring] = useState(false);
 
   // Create or restore Steel session on mount
   useEffect(() => {
@@ -95,6 +98,51 @@ export default function Home() {
       if (pollRef.current) clearInterval(pollRef.current);
     };
   }, [sessionId]);
+
+  // Monitor for chess moves every 1 second when in a game
+  useEffect(() => {
+    if (!sessionId || !gameUrl) {
+      if (monitorRef.current) {
+        clearInterval(monitorRef.current);
+        monitorRef.current = null;
+      }
+      setMonitoring(false);
+      return;
+    }
+
+    setMonitoring(true);
+    let inFlight = false;
+
+    monitorRef.current = setInterval(async () => {
+      if (inFlight) return; // skip if previous request still pending
+      inFlight = true;
+      try {
+        const res = await fetch("/api/steel/monitor", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionId }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.move) {
+            setMoves((prev) => [...prev, data.move]);
+            console.log(`[monitor] Move detected: ${data.move}`);
+          }
+        }
+      } catch {
+        // Silently ignore monitor errors
+      } finally {
+        inFlight = false;
+      }
+    }, 1000);
+
+    return () => {
+      if (monitorRef.current) {
+        clearInterval(monitorRef.current);
+        monitorRef.current = null;
+      }
+    };
+  }, [sessionId, gameUrl]);
 
   // Note: session is intentionally NOT released on unmount so it persists across refreshes.
   // Sessions auto-expire after the Steel timeout (15 min).
@@ -178,6 +226,35 @@ export default function Home() {
         >
           Go to the live game
         </button>
+
+        {/* Move monitor */}
+        <div className="mt-4 border-t border-zinc-200 dark:border-zinc-800 pt-3">
+          <div className="flex items-center gap-2 mb-2">
+            <div
+              className={`w-2 h-2 rounded-full ${
+                monitoring ? "bg-green-500 animate-pulse" : "bg-zinc-400"
+              }`}
+            />
+            <span className="text-xs text-zinc-500 dark:text-zinc-400">
+              {monitoring ? "Monitoring" : "Not monitoring"}
+            </span>
+          </div>
+          {moves.length > 0 && (
+            <div className="space-y-1 max-h-64 overflow-y-auto">
+              <span className="text-xs font-medium text-zinc-600 dark:text-zinc-300">
+                Moves
+              </span>
+              {moves.map((move, i) => (
+                <div
+                  key={i}
+                  className="text-xs font-mono text-zinc-700 dark:text-zinc-300 bg-zinc-100 dark:bg-zinc-800 px-2 py-1 rounded"
+                >
+                  {i + 1}. {move}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Board view modal */}
