@@ -41,6 +41,7 @@ class BoardConfig:
     piece_base_diameters: dict[str, float]  # base = widest point = collision-cylinder diameter
     piece_stem_diameters: dict[str, float] = field(default_factory=dict)  # grippable neck width
     grasp_height: dict[str, float] = field(default_factory=dict)  # per-piece fingertip target (m)
+    gripper_closed_pct: dict[str, float | None] = field(default_factory=dict)  # per-piece hold (%)
 
     @property
     def robot_color(self) -> str:
@@ -140,6 +141,16 @@ class TunedGrasp:
 
 
 @dataclass(frozen=True)
+class GraspChoice:
+    """One grasp to try for a transfer: tool tilt, fingertip height, where the stem sits."""
+
+    pitch: float  # rad
+    z: float  # top-down fingertip height (m), before tilting
+    grip_depth: float | None  # m back from the jaw tips; None = the pads
+    label: str = ""
+
+
+@dataclass(frozen=True)
 class Config:
     measured: bool
     board: BoardConfig
@@ -147,6 +158,9 @@ class Config:
     handoff: HandoffConfig
     source_dir: Path = field(default=DEFAULT_CONFIG_DIR)
     grasp_tuning: dict[str, TunedGrasp] = field(default_factory=dict)  # from grasp.yaml
+    # Per piece, per square: a grasp that replaces the piece's default where it cannot work (e.g.
+    # the near-vertical grab on h3-h6, too close to follower_1's base for a level one).
+    square_grasps: dict[str, dict[str, TunedGrasp]] = field(default_factory=dict)
 
     def grasp_for(self, piece: str, default_pitch: float = 0.0) -> tuple[float, float]:
         """``(pitch rad, fingertip z m)`` for ``piece``: its tuned grasp if one was saved, else the
@@ -156,6 +170,30 @@ class Config:
         if tuned is None:
             return default_pitch, z
         return math.radians(tuned.pitch_deg), z + tuned.z_offset_mm / 1000.0
+
+    def gripper_closed_for(self, piece: str) -> float:
+        """Gripper percent that holds ``piece`` (board.yaml gripper_closed_pct), else the default."""
+        value = self.board.gripper_closed_pct.get(piece)
+        return self.arms.gripper_closed if value is None else value
+
+    def grasp_choices(self, piece: str, squares: list[str]) -> list[GraspChoice]:
+        """Grasps to try, in order, for moving ``piece`` between ``squares``: a per-square override
+        for any of them first, then the piece's tuned default. Empty if the piece is untuned.
+
+        One transfer uses ONE grasp at both ends: the piece cannot change its tilt in the jaws."""
+        out: list[GraspChoice] = []
+        base_z = self.board.grasp_height.get(piece, self.arms.z_grasp)
+        overrides = self.square_grasps.get(piece, {})
+        picks = [(f"{piece} @ {sq}", overrides[sq]) for sq in squares if sq in overrides]
+        if piece in self.grasp_tuning:
+            picks.append((f"{piece} default", self.grasp_tuning[piece]))
+        for label, tuned in picks:
+            choice = GraspChoice(math.radians(tuned.pitch_deg), base_z + tuned.z_offset_mm / 1000.0,
+                                 None if tuned.grip_depth_mm is None else tuned.grip_depth_mm / 1000.0,
+                                 label)
+            if all((c.pitch, c.z, c.grip_depth) != (choice.pitch, choice.z, choice.grip_depth) for c in out):
+                out.append(choice)
+        return out
 
     def grip_depth_for(self, piece: str) -> float | None:
         """Where ``piece``'s stem sits in the jaws (m back from the tips), or None for the pads."""
@@ -198,6 +236,8 @@ def load_config(config_dir: str | Path | None = None) -> Config:
         piece_base_diameters=_float_map(board_raw, "piece_base_diameters"),
         piece_stem_diameters=_float_map(board_raw, "piece_stem_diameters"),
         grasp_height=_float_map(board_raw, "grasp_height"),
+        gripper_closed_pct={str(k): None if v is None else float(v)
+                            for k, v in (board_raw.get("gripper_closed_pct") or {}).items()},
     )
 
     arms = ArmsConfig(
@@ -233,16 +273,24 @@ def load_config(config_dir: str | Path | None = None) -> Config:
         handoff=handoff,
         source_dir=config_dir,
         grasp_tuning=_load_grasp_tuning(config_dir / GRASP_FILE),
+        square_grasps=_load_square_grasps(config_dir / GRASP_FILE),
     )
 
 
-def save_tuned_grasp(config_dir: str | Path, piece: str, tuned: TunedGrasp) -> Path:
-    """Write ``tuned`` as ``piece``'s entry in ``config_dir/grasp.yaml`` (other pieces kept)."""
+def save_tuned_grasp(config_dir: str | Path, piece: str, tuned: TunedGrasp,
+                     squares: list[str] | None = None) -> Path:
+    """Write ``tuned`` as ``piece``'s default in ``config_dir/grasp.yaml``, or, with ``squares``,
+    as its override on those squares. Other pieces, the default and other squares are kept."""
     if piece not in PIECE_TYPES:
         raise ValueError(f"unknown piece {piece!r}; expected one of {PIECE_TYPES}")
     path = Path(config_dir) / GRASP_FILE
     data = (yaml.safe_load(path.read_text()) or {}) if path.is_file() else {}
-    data[piece] = asdict(tuned)
+    entry = data.setdefault(piece, {})
+    if squares:
+        for sq in squares:
+            entry.setdefault("squares", {})[sq] = asdict(tuned)
+    else:
+        entry.update(asdict(tuned))
     path.write_text(GRASP_HEADER + yaml.safe_dump(data, sort_keys=True))
     return path
 
@@ -289,15 +337,28 @@ def _load_grasp_tuning(path: Path) -> dict[str, TunedGrasp]:
     for piece, entry in data.items():
         if piece not in PIECE_TYPES:
             raise ValueError(f"{path}: unknown piece {piece!r}; expected one of {PIECE_TYPES}")
-        tuned[piece] = TunedGrasp(
-            pitch_deg=_float(entry, "pitch_deg"),
-            z_offset_mm=float(entry.get("z_offset_mm", 0.0)),
-            grip_depth_mm=None if entry.get("grip_depth_mm") is None else float(entry["grip_depth_mm"]),
-            confirmed=str(entry.get("confirmed", "")),
-            tuned_on=str(entry.get("tuned_on", "")),
-            date=str(entry.get("date", "")),
-        )
+        if "pitch_deg" in entry:  # a piece may have only per-square overrides
+            tuned[piece] = _tuned(entry)
     return tuned
+
+
+def _load_square_grasps(path: Path) -> dict[str, dict[str, TunedGrasp]]:
+    if not path.is_file():
+        return {}
+    data = yaml.safe_load(path.read_text()) or {}
+    return {piece: {str(sq): _tuned(e) for sq, e in (entry.get("squares") or {}).items()}
+            for piece, entry in data.items() if isinstance(entry, dict) and entry.get("squares")}
+
+
+def _tuned(entry: dict[str, Any]) -> TunedGrasp:
+    return TunedGrasp(
+        pitch_deg=_float(entry, "pitch_deg"),
+        z_offset_mm=float(entry.get("z_offset_mm", 0.0)),
+        grip_depth_mm=None if entry.get("grip_depth_mm") is None else float(entry["grip_depth_mm"]),
+        confirmed=str(entry.get("confirmed", "")),
+        tuned_on=str(entry.get("tuned_on", "")),
+        date=str(entry.get("date", "")),
+    )
 
 
 def _pose(d: dict[str, Any]) -> Pose:

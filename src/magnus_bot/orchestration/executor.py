@@ -29,7 +29,7 @@ from dataclasses import dataclass
 import chess
 import numpy as np
 
-from magnus_bot.config import Config
+from magnus_bot.config import Config, GraspChoice
 from magnus_bot.geometry import board as board_geom
 from magnus_bot.geometry.frames import arm_placements
 from magnus_bot.hardware.arm import Arm
@@ -93,6 +93,7 @@ class ArmTrajectory:
     # (sample index, phase): the arm must have ARRIVED at samples[index] before streaming goes on,
     # because the next segment opens or closes the gripper there.
     checkpoints: tuple[tuple[int, str], ...] = ()
+    grasp: str = ""  # which grasp was used (e.g. "rook @ h4", "rook default", "as given")
 
 
 def location_to_xyz(loc: Location, config: Config, arm_id: str) -> np.ndarray:
@@ -156,6 +157,23 @@ def check_limits(joints: Mapping[str, float], limits: Mapping[str, JointLimit]) 
         raise JointLimitError(", ".join(bad))
 
 
+GRASP_HEIGHT_PHASES = {  # steps that sit at the piece's grasp height, per end of the transfer
+    "src": (Phase.DESCEND_PICK, Phase.GRIP),
+    "dst": (Phase.DESCEND_PLACE, Phase.RELEASE),
+}
+
+
+def piece_name(symbol: str) -> str:
+    """'R' / 'r' -> 'rook' (configs key pieces by name)."""
+    return chess.piece_name(chess.Piece.from_symbol(symbol).piece_type)
+
+
+def transfer_squares(transfer: Transfer) -> list[str]:
+    """The board squares a transfer touches (src first), e.g. ['h4', 'h5']."""
+    return [chess.square_name(chess.square(*loc.square)) for loc in (transfer.src, transfer.dst)
+            if loc.kind == SQUARE and loc.square is not None]
+
+
 def plan_joint_program(
     program: list[ArmSteps],
     config: Config,
@@ -166,54 +184,79 @@ def plan_joint_program(
     hz: float = 30.0,
     pitch: float = 0.0,
     grip_depth: float | None = None,
+    tuned_grasps: bool = False,
 ) -> list[ArmTrajectory]:
     """Joint trajectories for a whole program, each starting and ending at that arm's ``rest`` pose.
 
     ``pitch`` tilts the tool off vertical for every grasp waypoint (0 = top-down), holding the stem
-    ``grip_depth`` back from the jaw tips (default: the pads; :func:`tilted_tip_target`). Raises
-    :class:`Unreachable` or :class:`JointLimitError` (with arm, transfer and phase) if any waypoint
-    cannot be commanded. Pure: nothing is sent to any arm.
+    ``grip_depth`` back from the jaw tips (default: the pads; :func:`tilted_tip_target`). With
+    ``tuned_grasps``, each transfer instead tries the piece's tuned grasps (configs/grasp.yaml:
+    per-square overrides for its squares first, then the piece's default) and takes the first that
+    plans at BOTH ends. Raises :class:`Unreachable` or :class:`JointLimitError` (with arm, transfer
+    and phase) if a transfer cannot be commanded. Pure: nothing is sent to any arm.
     """
     placements = arm_placements(config.board.square_size, config.arms.edge_gap)
     trajectories = []
     for arm_steps in program:
-        placement = placements[arm_steps.arm_id]
-        correction = config.arms.correction(arm_steps.arm_id)  # where the real arm lands vs the model
         home = dict(rest[arm_steps.arm_id])
-        gripper = home["gripper"]
-        waypoints = [home]
-        checkpoints = []  # (waypoint index, phase) the arm must reach before the gripper acts
-        for step in arm_steps.steps:
-            if step.phase in GRIPPER_PHASES:
-                checkpoints.append((len(waypoints) - 1, step.phase.value))
-            if step.gripper == OPEN:
-                gripper = config.arms.gripper_open
-            elif step.gripper == CLOSE:
-                gripper = config.arms.gripper_closed
-            where = f"{arm_steps.arm_id} {arm_steps.transfer.reason} {step.phase.value}"
-            x, y = placement.board_to_arm(step.xyz[:2])
-            target = correction.apply(tilted_tip_target(np.array([x, y, step.xyz[2]]), pitch,
-                                                        kinematics.model.tip_to_pad, grip_depth))
-            tip_z = target[2] - correction.z  # where the real (sagging) tip goes
-            if tip_z < TABLE_CLEARANCE:
-                raise Unreachable(f"{where}: the fingertip would be {tip_z * 1000:.1f} mm above the board "
-                                  f"(< {TABLE_CLEARANCE * 1000:.0f} mm): the jaw tips would hit the table")
+        piece = piece_name(arm_steps.transfer.piece_symbol)
+        choices = config.grasp_choices(piece, transfer_squares(arm_steps.transfer)) if tuned_grasps else []
+        if not choices:
+            choices = [GraspChoice(pitch, None, grip_depth, "as given")]  # type: ignore[arg-type]
+        first_error: Exception | None = None
+        for choice in choices:
             try:
-                model = kinematics.inverse(target, pitch=pitch)
-            except Unreachable as exc:
-                raise Unreachable(f"{where}: {exc}") from exc
-            command = to_command(model) if to_command else dict(model)
-            command["gripper"] = gripper
-            try:
-                check_limits(command, limits)
-            except JointLimitError as exc:
-                raise JointLimitError(f"{where}: {exc}") from exc
-            waypoints.append(command)
-        waypoints.append(home)  # back to rest: clears the board (and the pad) for the other arm
+                waypoints, checkpoints = _arm_waypoints(arm_steps, config, home, placements[arm_steps.arm_id],
+                                                        kinematics, limits, to_command, choice, piece)
+                break
+            except (Unreachable, JointLimitError) as exc:
+                first_error = first_error or exc
+        else:
+            raise first_error  # type: ignore[misc]
         samples, at = plan_joint_trajectory_indexed(waypoints, config.arms.speed_scale, hz)
         trajectories.append(ArmTrajectory(arm_steps.arm_id, arm_steps.transfer, samples,
-                                          tuple((at[i], phase) for i, phase in checkpoints)))
+                                          tuple((at[i], phase) for i, phase in checkpoints), choice.label))
     return trajectories
+
+
+def _arm_waypoints(arm_steps, config, home, placement, kinematics, limits, to_command, choice, piece):
+    """Joint waypoints (rest first and last) for one transfer with one grasp ``choice``."""
+    correction = config.arms.correction(arm_steps.arm_id)  # where the real arm lands vs the model
+    at_grasp = {ph for end, loc in (("src", arm_steps.transfer.src), ("dst", arm_steps.transfer.dst))
+                if loc.kind == SQUARE for ph in GRASP_HEIGHT_PHASES[end]}
+    gripper = home["gripper"]
+    waypoints = [home]
+    checkpoints = []  # (waypoint index, phase) the arm must reach before the gripper acts
+    for step in arm_steps.steps:
+        if step.phase in GRIPPER_PHASES:
+            checkpoints.append((len(waypoints) - 1, step.phase.value))
+        if step.gripper == OPEN:
+            gripper = config.arms.gripper_open
+        elif step.gripper == CLOSE:
+            gripper = config.gripper_closed_for(piece)
+        where = f"{arm_steps.arm_id} {arm_steps.transfer.reason} {step.phase.value}"
+        x, y = placement.board_to_arm(step.xyz[:2])
+        z = choice.z if choice.z is not None and step.phase in at_grasp else step.xyz[2]
+        target = correction.apply(tilted_tip_target(np.array([x, y, z]), choice.pitch,
+                                                    kinematics.model.tip_to_pad, choice.grip_depth))
+        tip_z = target[2] - correction.z  # where the real (sagging) tip goes
+        if tip_z < TABLE_CLEARANCE:
+            raise Unreachable(f"{where}: the fingertip would be {tip_z * 1000:.1f} mm above the board "
+                              f"(< {TABLE_CLEARANCE * 1000:.0f} mm): the jaw tips would hit the table "
+                              f"[{choice.label}]")
+        try:
+            model = kinematics.inverse(target, pitch=choice.pitch)
+        except Unreachable as exc:
+            raise Unreachable(f"{where}: {exc} [{choice.label}]") from exc
+        command = to_command(model) if to_command else dict(model)
+        command["gripper"] = gripper
+        try:
+            check_limits(command, limits)
+        except JointLimitError as exc:
+            raise JointLimitError(f"{where}: {exc} [{choice.label}]") from exc
+        waypoints.append(command)
+    waypoints.append(home)  # back to rest: clears the board (and the pad) for the other arm
+    return waypoints, checkpoints
 
 
 class Executor:
@@ -232,11 +275,13 @@ class Executor:
         hz: float = 30.0,
         pitch: float = 0.0,
         grip_depth: float | None = None,
+        tuned_grasps: bool = False,
     ) -> None:
         if live and simulate:
             raise ValueError("choose live or simulate, not both")
         self.pitch = pitch
         self.grip_depth = grip_depth
+        self.tuned_grasps = tuned_grasps  # per-transfer grasps from configs/grasp.yaml
         self.config = config
         self.arms = arms
         self.rmap = rmap
@@ -278,7 +323,7 @@ class Executor:
         rest = {arm_id: self.arms[arm_id].read_joints() for arm_id in used}
         return plan_joint_program(
             program, self.config, rest, self.kinematics, self.limits, self.to_command,
-            self.hz, self.pitch, self.grip_depth,
+            self.hz, self.pitch, self.grip_depth, self.tuned_grasps,
         )
 
     def run(self, trajectories: list[ArmTrajectory]) -> None:

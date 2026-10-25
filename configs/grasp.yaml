@@ -1,0 +1,11 @@
+# Grasp settings found by closed-loop tuning. Written by `scripts/tune_grasp.py --save`.
+# pitch_deg: tool tilt from vertical. z_offset_mm: added to board.yaml grasp_height[piece].
+# confirmed: fresh trials that passed at this setting before it was saved.
+# Read by Config.grasp_for (first_move.py uses it). Delete a piece's entry to go back to untuned.
+rook:
+  confirmed: '9/10 live at 60 deg (-9: 5/6; -12: 2/2; -6: 2/2)'
+  date: '2026-10-25'
+  grip_depth_mm: null
+  pitch_deg: 60.0
+  tuned_on: follower_1 g3g4, g4g5, g5g6 (logs 2026-10-24/25)
+  z_offset_mm: -9.0

@@ -53,7 +53,8 @@ def vision_server():
 @pytest.fixture
 def config_dir(tmp_path):
     """Factory: a copy of configs/ with ``measured`` pinned, independent of the local checkout
-    (the operator's working copy may carry ``measured: true``; the repo ships ``false``)."""
+    (the operator's working copy may carry ``measured: true``; the repo ships ``false``), and no
+    tuned grasps (configs/grasp.yaml is left out)."""
 
     def make(measured: bool) -> Path:
         out = tmp_path / f"configs-measured-{measured}"
@@ -62,6 +63,7 @@ def config_dir(tmp_path):
         text, n = re.subn(r"(?m)^measured:\s*\w+", f"measured: {str(measured).lower()}", board.read_text())
         assert n == 1, "board.yaml should have exactly one top-level measured: key"
         board.write_text(text)
+        (out / "grasp.yaml").unlink(missing_ok=True)  # start untuned; tests save their own grasps
         return out
 
     return make

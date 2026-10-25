@@ -59,7 +59,7 @@ def test_first_move_defaults_to_the_tuned_grasp(first_move, config_dir, capsys):
     save_tuned_grasp(cfg, "rook", TunedGrasp(pitch_deg=30.0, z_offset_mm=2.0))
     assert first_move.main(["--config-dir", str(cfg)]) == 0
     out = capsys.readouterr().out
-    assert "30 deg tilt (tuned)" in out
+    assert "30 deg tilt (rook default)" in out
     measured = load_config(cfg).board.grasp_height["rook"]
     assert f"grasp z {(measured + 0.002) * 1000:.1f} mm" in out  # measured height + the tuned 2 mm
 
@@ -82,3 +82,38 @@ def test_grip_depth_is_saved_and_read_back(config_dir):
     config = load_config(cfg)
     assert config.grip_depth_for("rook") == pytest.approx(0.012)
     assert config.grip_depth_for("king") is None  # untuned: stem at the pads
+
+
+def test_square_overrides_are_saved_beside_the_default(config_dir):
+    cfg = config_dir(measured=False)
+    save_tuned_grasp(cfg, "rook", TunedGrasp(pitch_deg=60.0, z_offset_mm=-9.0))
+    save_tuned_grasp(cfg, "rook", TunedGrasp(pitch_deg=20.0, z_offset_mm=-12.0, grip_depth_mm=10.0),
+                     squares=["h3", "h4"])
+    save_tuned_grasp(cfg, "rook", TunedGrasp(pitch_deg=61.0, z_offset_mm=-9.0))  # default again
+    config = load_config(cfg)
+    assert config.grasp_tuning["rook"].pitch_deg == 61.0
+    assert set(config.square_grasps["rook"]) == {"h3", "h4"}  # overrides survive a default re-save
+    assert config.square_grasps["rook"]["h4"].grip_depth_mm == 10.0
+
+
+def test_a_move_touching_an_override_square_tries_the_override_first(config_dir):
+    cfg = config_dir(measured=False)
+    save_tuned_grasp(cfg, "rook", TunedGrasp(pitch_deg=60.0, z_offset_mm=-9.0))
+    save_tuned_grasp(cfg, "rook", TunedGrasp(pitch_deg=20.0, z_offset_mm=-12.0, grip_depth_mm=10.0),
+                     squares=["h4"])
+    config = load_config(cfg)
+    base = config.board.grasp_height["rook"]
+    g = config.grasp_choices("rook", ["g3", "g4"])
+    assert [c.label for c in g] == ["rook default"]
+    h = config.grasp_choices("rook", ["g4", "h4"])  # one grasp for both ends: the override wins
+    assert [c.label for c in h] == ["rook @ h4", "rook default"]
+    assert h[0].pitch == pytest.approx(math.radians(20)) and h[0].z == pytest.approx(base - 0.012)
+    assert h[0].grip_depth == pytest.approx(0.010)
+    assert config.grasp_choices("king", ["g4", "g5"]) == []  # untuned piece
+
+
+def test_each_piece_closes_the_gripper_to_its_own_hold(config_dir):
+    config = load_config(config_dir(measured=False))
+    assert config.gripper_closed_for("rook") == config.board.gripper_closed_pct["rook"]
+    assert config.board.gripper_closed_pct.get("pawn") is None
+    assert config.gripper_closed_for("pawn") == config.arms.gripper_closed  # unmeasured: the default

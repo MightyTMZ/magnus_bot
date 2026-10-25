@@ -97,8 +97,13 @@ class ArmShuttle:
 
     def program(self, src: str, dst: str) -> list[ArmSteps]:
         board = chess.Board(None)
-        board.set_piece_at(chess.parse_square(src), self.piece)
+        piece = self.piece
         move = chess.Move(chess.parse_square(src), chess.parse_square(dst))
+        board.set_piece_at(move.from_square, piece)
+        if move not in board.legal_moves:  # a pawn shuttling back: the same piece, played by Black
+            piece = chess.Piece(piece.piece_type, not piece.color)
+            board.set_piece_at(move.from_square, piece)
+            board.turn = piece.color
         return build_move_program(board, move, self.executor.rmap, self.executor.config)
 
     def transfer(self, src: str, dst: str) -> None:
@@ -155,6 +160,12 @@ def main(argv: list[str] | None = None, prompt=input) -> int:
     parser.add_argument("--min-z-step", type=float, default=1.0, help="search: finest height step, mm")
     parser.add_argument("--save", action="store_true",
                         help="confirm the winner, then write it to configs/grasp.yaml if it holds up")
+    parser.add_argument("--save-squares", default=None,
+                        help="with --save: store the winner as the piece's grasp for THESE squares only "
+                             "(e.g. h3,h4,h5,h6), leaving its default alone")
+    parser.add_argument("--gripper-closed", type=float, default=None,
+                        help="gripper percent that holds this piece (default: board.yaml "
+                             "gripper_closed_pct; measure with scripts/gripper_read.py)")
     parser.add_argument("--confirm", type=int, default=10, help="fresh attempts to confirm the winner")
     parser.add_argument("--min-success", type=float, default=0.9,
                         help="confirmation success rate needed to save (0..1)")
@@ -194,6 +205,17 @@ def main(argv: list[str] | None = None, prompt=input) -> int:
         mv = chess.Move.from_uci(args.uci)
     except ValueError as e:
         parser.error(str(e))
+    save_squares = None
+    if args.save_squares:
+        save_squares = [s.strip() for s in args.save_squares.split(",") if s.strip()]
+        for sq in save_squares:
+            try:
+                chess.parse_square(sq)
+            except ValueError:
+                parser.error(f"--save-squares: {sq!r} is not a square")
+        if not args.save:
+            parser.error("--save-squares needs --save")
+    args.save_squares = save_squares
     if args.save and not args.live and args.config_dir is None:
         parser.error("refusing to save SIMULATED results into configs/; "
                      "use --live, or --config-dir elsewhere")
@@ -202,6 +224,15 @@ def main(argv: list[str] | None = None, prompt=input) -> int:
     config = load_config(args.config_dir)
     if args.arm not in config.arms.arms:
         parser.error(f"unknown arm {args.arm!r}; configured: {sorted(config.arms.arms)}")
+    if args.gripper_closed is not None:  # this run's hold for the piece
+        config = dataclasses.replace(config, board=dataclasses.replace(
+            config.board, gripper_closed_pct={**config.board.gripper_closed_pct,
+                                              args.piece: args.gripper_closed}))
+    if args.live and config.board.gripper_closed_pct.get(args.piece) is None:
+        print(f"live refused: no gripper hold for the {args.piece} (board.yaml gripper_closed_pct is null); "
+              f"measure it with scripts/gripper_read.py, then pass --gripper-closed or fill board.yaml",
+              file=sys.stderr)
+        return 1
     base_z = config.board.grasp_height.get(args.piece, config.arms.z_grasp)
     grip_depth = None if args.grip_depth_mm is None else args.grip_depth_mm / 1000.0
     kin = SO101Kinematics()
@@ -359,8 +390,9 @@ def _save_winner(args, config_dir: Path, winner: SettingResult | None, check: Se
         pitch_deg=winner.setting.pitch_deg, z_offset_mm=winner.setting.z_offset_mm,
         grip_depth_mm=args.grip_depth_mm,
         confirmed=confirmed, tuned_on=f"{args.arm} {args.uci}", date=time.strftime("%Y-%m-%d"),
-    ))
-    print(f"saved {args.piece}: {label}, confirmed {confirmed} -> {path}")
+    ), squares=args.save_squares)
+    where = f" on {', '.join(args.save_squares)}" if args.save_squares else ""
+    print(f"saved {args.piece}{where}: {label}, confirmed {confirmed} -> {path}")
     return 0
 
 

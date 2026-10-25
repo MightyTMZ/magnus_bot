@@ -106,6 +106,19 @@ base 0.078 + the arm falling 33 mm short (`arms.reach_correction`) + 2 mm right 
   ~6 cm further from the board would open h4/h5 at 50-70 deg (h3/h6 at ~3-4 cm), at the cost of
   the d-file and e1/e8 for follower_1. Operator decision pending.
 
+- **Decision (operator, 2026-10-25): accept a near-vertical grab on h3-h6; bring more of the board
+  and the other pieces up.** Built for that:
+  - grasp.yaml per-SQUARE overrides (`squares:` under a piece; `tune_grasp.py --save
+    --save-squares h3,h4,h5,h6`). `Config.grasp_choices(piece, squares)`: overrides for the
+    transfer's squares first, then the piece default. The executor (`tuned_grasps=True`;
+    first_move uses it) takes the first that plans at BOTH ends: one grasp per transfer, since the
+    piece cannot change tilt in the jaws (g4->h4 uses the h4 override at g4 too).
+  - Per-piece gripper hold: `board.yaml gripper_closed_pct` (rook 4.15, others null);
+    `tune_grasp.py --gripper-closed PCT`; live tuning refuses a piece with no hold value.
+  - tune_grasp shuttles pawns back as a Black pawn (a white pawn cannot move backwards).
+  - **Rook default saved** (configs/grasp.yaml): 60 deg, pads, z -9: 9/10 live across g3g4, g4g5,
+    g5g6 (-9: 5/6; -12, -6: 2/2 each). Sim: also plans on f4f5, e4e5.
+
 ## Earlier session (2026-10-24, Alex + Claude, part 2) — reach probe, geometry calibrated
 - **Why:** after the live tuning run missed every time, the camera could only say "not picked".
   Measuring WHERE the arm goes split the miss into motors vs geometry.

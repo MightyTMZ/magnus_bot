@@ -71,9 +71,20 @@ def main(argv: list[str] | None = None) -> int:
 
     kin = SO101Kinematics()
     placements = arm_placements(config.board.square_size, config.arms.edge_gap)
+    # Tuned mode (no --pitch): each move takes the rook's grasp for its squares (grasp.yaml overrides,
+    # e.g. the near-vertical one on h3-h6), so the reach check allows up to the steepest of them.
+    tuned = args.pitch is None and PIECE in config.grasp_tuning
+    names = [chess.square_name(chess.square(*sq)) for sq in (src, dst)]
+    choices = config.grasp_choices(PIECE, names) if tuned else []
+    if choices:
+        pitch, grip_depth = choices[0].pitch, choices[0].grip_depth
+        z_grasp = choices[0].z
+        config = dataclasses.replace(config, arms=dataclasses.replace(config.arms, z_grasp=z_grasp))
+        source = choices[0].label
     rmap = compute_reachability(
         placements, kin, config.arms.z_grasp, config.board.square_size,
-        z_clear=config.arms.z_clear, max_pitch=pitch, grip_depth=grip_depth,
+        z_clear=config.arms.z_clear, max_pitch=max([pitch] + [c.pitch for c in choices]),
+        grip_depth=grip_depth,
         corrections=config.arms.corrections(),
     )
     for sq in (src, dst):
@@ -91,7 +102,8 @@ def main(argv: list[str] | None = None) -> int:
         arms = {a: SimArm(a) for a in config.arms.arms}
         for arm in arms.values():
             arm.connect()
-        ex = Executor(config, arms, rmap, simulate=True, pitch=pitch, grip_depth=grip_depth)
+        ex = Executor(config, arms, rmap, simulate=True, pitch=pitch, grip_depth=grip_depth,
+                      tuned_grasps=tuned)
         ex.run(ex.plan(program))  # raises on any unreachable / limit / verify fault
         print(f"SIM OK: {ARM} {label} planned + executed ({len(program[0].steps)} phases), arms at rest.")
         return 0
@@ -114,6 +126,7 @@ def main(argv: list[str] | None = None) -> int:
             kinematics=kin,
             pitch=pitch,
             grip_depth=grip_depth,
+            tuned_grasps=tuned,
         )
         print(f"LIVE: driving {ARM} {label}. Watch the arm; hand near the power.")
         ex.run(ex.plan(program))

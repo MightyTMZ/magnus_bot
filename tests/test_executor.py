@@ -263,3 +263,21 @@ def test_a_grasp_that_would_drive_the_tips_into_the_table_is_refused():
     with pytest.raises(Unreachable, match="hit the table"):
         executor.execute_move(ROOK_H4, H4H5)
     assert all(not arm.command_log for arm in arms.values())  # refused before anything moved
+
+
+def test_tuned_grasps_use_the_square_override_at_both_ends(config_dir):
+    from magnus_bot.config import TunedGrasp, save_tuned_grasp
+
+    cfg = config_dir(measured=False)
+    save_tuned_grasp(cfg, "rook", TunedGrasp(pitch_deg=60.0, z_offset_mm=-9.0))
+    save_tuned_grasp(cfg, "rook", TunedGrasp(pitch_deg=20.0, z_offset_mm=-6.0, grip_depth_mm=10.0),
+                     squares=["h4"])
+    config = load_config(cfg)
+    config = dataclasses.replace(config, arms=dataclasses.replace(config.arms, z_clear=0.06))
+    arms, _ = _sim(config)
+    executor = Executor(config, arms, _full_reach_map(config), simulate=True, tuned_grasps=True)
+    board = chess.Board("4k3/8/8/8/6R1/8/8/4K3 w - - 0 1")  # rook on g4
+    near = executor.plan(build_move_program(board, chess.Move.from_uci("g4h4"), executor.rmap, config))
+    assert near[0].grasp == "rook @ h4"  # g4 -> h4 takes the near-vertical grasp at BOTH ends
+    far = executor.plan(build_move_program(board, chess.Move.from_uci("g4g5"), executor.rmap, config))
+    assert far[0].grasp == "rook default"
