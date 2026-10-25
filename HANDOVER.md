@@ -127,6 +127,17 @@ base 0.078 + the arm falling 33 mm short (`arms.reach_correction`) + 2 mm right 
   the REAL tip moves square to the reach. `tune_grasp.py --side-offsets 3,6,9` sweeps it; --save
   stores it with the grasp (per piece / per square).
 
+- **Arm-wide grasp aim offset** `arms.grasp_side_offset` (follower_1 3 mm toward rank 1): grasps
+  were still landing on the heads.
+- **Queen at 60 deg faulted 3x** "did not reach the pose before grip (elbow -4.9 deg)": a tall
+  piece's grip point (~39 mm) at 60 deg needs the elbow past its servo stop (+/-96.3 deg). The
+  arrival check held the arm each time. Within the stops on g4/g5: pawn/bishop/knight/queen/king
+  up to ~50 deg (all their z ranges); the rook's 60 deg is ~1.5 deg past the stop (inside the
+  3 deg arrival tolerance, which is why it works). Use 30/45 deg for the other pieces.
+- tune_grasp now shuttles ANY piece between ANY two squares (plans a queen's move, carries the real
+  piece's symbol, so its grasp + gripper hold apply): bishop/knight runs on g4g5 had failed as
+  illegal moves.
+
 ## Earlier session (2026-10-24, Alex + Claude, part 2) — reach probe, geometry calibrated
 - **Why:** after the live tuning run missed every time, the camera could only say "not picked".
   Measuring WHERE the arm goes split the miss into motors vs geometry.

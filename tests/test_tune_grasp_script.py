@@ -148,3 +148,25 @@ def test_live_needs_a_typed_yes(tune, config_dir, vision_server, capsys):
     argv = ["--live", "--config-dir", str(config_dir(measured=True)), "--vision-url", vision_server.url]
     assert tune.main(argv, prompt=lambda message: "no") == 1
     assert "aborted" in capsys.readouterr().out
+
+
+def test_any_piece_shuttles_between_adjacent_squares(tune, tmp_path, capsys):
+    # g4g5 is no bishop, knight or backward-pawn move; tuning still has to shuttle them there.
+    for piece in ("bishop", "knight", "pawn"):
+        argv = ["--uci", "g4g5", "--piece", piece, "--pitches", "45", "--trials", "2",
+                "--log", str(tmp_path / f"{piece}.jsonl")]
+        assert tune.main(argv) == 0, piece
+        assert "2/2 ok" in capsys.readouterr().out
+
+
+def test_the_shuttled_piece_keeps_its_own_gripper_hold(tune):
+    from types import SimpleNamespace
+
+    from magnus_bot.cli import _full_reach_map
+    from magnus_bot.config import load_config
+
+    config = load_config()
+    shuttle = tune.ArmShuttle(SimpleNamespace(rmap=_full_reach_map(config), config=config),
+                              tune.chess.Piece(tune.chess.BISHOP, tune.chess.WHITE))
+    (steps,) = shuttle.program("g4", "g5")  # planned as a queen's move...
+    assert steps.transfer.piece_symbol == "B"  # ...but carried as the bishop (its grasp and hold)

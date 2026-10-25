@@ -97,14 +97,18 @@ class ArmShuttle:
 
     def program(self, src: str, dst: str) -> list[ArmSteps]:
         board = chess.Board(None)
-        piece = self.piece
         move = chess.Move(chess.parse_square(src), chess.parse_square(dst))
-        board.set_piece_at(move.from_square, piece)
-        if move not in board.legal_moves:  # a pawn shuttling back: the same piece, played by Black
-            piece = chess.Piece(piece.piece_type, not piece.color)
-            board.set_piece_at(move.from_square, piece)
-            board.turn = piece.color
-        return build_move_program(board, move, self.executor.rmap, self.executor.config)
+        board.set_piece_at(move.from_square, self.piece)
+        if move in board.legal_moves:
+            return build_move_program(board, move, self.executor.rmap, self.executor.config)
+        # Tuning shuttles between ANY two squares (g4g5 is no bishop, knight or backward-pawn move):
+        # plan it as a queen's move, then hand the transfer back to the real piece, whose grasp and
+        # gripper hold the executor uses.
+        board.set_piece_at(move.from_square, chess.Piece(chess.QUEEN, self.piece.color))
+        program = build_move_program(board, move, self.executor.rmap, self.executor.config)
+        symbol = self.piece.symbol()
+        return [dataclasses.replace(s, transfer=dataclasses.replace(s.transfer, piece_symbol=symbol))
+                for s in program]
 
     def transfer(self, src: str, dst: str) -> None:
         self.executor.run(self.executor.plan(self.program(src, dst)))
