@@ -16,6 +16,7 @@ as an empty board.
 Endpoints:
     GET /                          live view (annotated frame + status), refreshed in the browser
     GET /frame.jpg                 the latest annotated frame
+    GET /raw.jpg                   the latest frame without annotations (for colour checks)
     GET /health                    {"ok", "frame_id", "fps", "camera_ok", "board_visible", "contrast"}
     GET /board                     newest reading, possibly mid-motion (see "stable")
     GET /board?fresh=1&timeout=8   waits until the last --stable-frames readings agree and were
@@ -53,10 +54,12 @@ from board import (
 from detector import detect, load_model
 
 MAX_FRESH_TIMEOUT = 60.0
-# OpenCV HSV (H 0-180). Measured 2026-10-24 on the rig: the painted tips are yellow-green (H 32-47,
-# S 25-127, V 154-231); the board's dark squares are blue-green (H 83, S 80) and the gripper's
-# yellow band is H 27-29, so hue separates them. Re-measure if the paint or lighting changes.
-DEFAULT_MARKER_HSV = "33,55,120,55,255,255"
+# OpenCV HSV (H 0-180). Re-measured 2026-10-25 on /raw.jpg (the camera's white balance had moved):
+# the painted tips read lime, H 58-66, S 140-160, V 170-180; the white pieces (and their bases)
+# H 31-40 but only S 60-80, so saturation drops them; the dark squares H 65-85 but V ~100, so
+# brightness drops them. The 2026-10-24 range (H 33-55, S >= 55) had come to catch the pieces and
+# miss the paint. Re-measure from /raw.jpg if the paint, the lighting or the phone changes.
+DEFAULT_MARKER_HSV = "50,110,100,75,255,255"
 MARKER_GROUP_PX = 80  # green blobs this close to the biggest one count as the same fingertip
 NEAR_MAX_SQUARES = 2.5  # ?near=: a tip farther than this from where it should be is someone else's
 OPEN_KERNEL = np.ones((3, 3), np.uint8)
@@ -313,6 +316,8 @@ def make_handler(state, box_annotator=None):
                 self._send(200, VIEW_PAGE, "text/html; charset=utf-8")
             elif url.path == "/frame.jpg":
                 self._frame()
+            elif url.path == "/raw.jpg":  # the rotated + cropped frame, no annotations (colour checks)
+                self._frame(raw=True)
             elif url.path == "/health":
                 self._json(200, {"ok": True, "frame_id": state.frame_id, "fps": round(state.fps, 1),
                                  "camera_ok": state.camera_ok, "board_visible": state.board_visible,
@@ -322,12 +327,13 @@ def make_handler(state, box_annotator=None):
             else:
                 self._json(404, {"error": f"unknown path {url.path}"})
 
-        def _frame(self):
+        def _frame(self, raw=False):
             view = state.latest_view
             if view is None:
                 self._json(503, {"error": "no frames yet"})
                 return
-            ok, jpg = cv2.imencode(".jpg", render(view, box_annotator), [cv2.IMWRITE_JPEG_QUALITY, 85])
+            image = view[0] if raw else render(view, box_annotator)
+            ok, jpg = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, 95])
             self._send(200, jpg.tobytes(), "image/jpeg")
 
         def _board(self, query):
