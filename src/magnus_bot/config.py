@@ -135,6 +135,7 @@ class TunedGrasp:
     pitch_deg: float
     z_offset_mm: float = 0.0
     grip_depth_mm: float | None = None  # stem this far back from the jaw tips; None = at the pads
+    side_offset_mm: float = 0.0  # aim this far to the arm's LEFT of the square (the jaws open sideways)
     confirmed: str = ""  # e.g. "10/10"
     tuned_on: str = ""  # e.g. "follower_1 g3g4"
     date: str = ""
@@ -148,6 +149,7 @@ class GraspChoice:
     z: float  # top-down fingertip height (m), before tilting
     grip_depth: float | None  # m back from the jaw tips; None = the pads
     label: str = ""
+    side: float = 0.0  # m to the arm's left of the square's centre
 
 
 @dataclass(frozen=True)
@@ -190,8 +192,9 @@ class Config:
         for label, tuned in picks:
             choice = GraspChoice(math.radians(tuned.pitch_deg), base_z + tuned.z_offset_mm / 1000.0,
                                  None if tuned.grip_depth_mm is None else tuned.grip_depth_mm / 1000.0,
-                                 label)
-            if all((c.pitch, c.z, c.grip_depth) != (choice.pitch, choice.z, choice.grip_depth) for c in out):
+                                 label, tuned.side_offset_mm / 1000.0)
+            key = (choice.pitch, choice.z, choice.grip_depth, choice.side)
+            if all((c.pitch, c.z, c.grip_depth, c.side) != key for c in out):
                 out.append(choice)
         return out
 
@@ -355,6 +358,7 @@ def _tuned(entry: dict[str, Any]) -> TunedGrasp:
         pitch_deg=_float(entry, "pitch_deg"),
         z_offset_mm=float(entry.get("z_offset_mm", 0.0)),
         grip_depth_mm=None if entry.get("grip_depth_mm") is None else float(entry["grip_depth_mm"]),
+        side_offset_mm=float(entry.get("side_offset_mm", 0.0)),
         confirmed=str(entry.get("confirmed", "")),
         tuned_on=str(entry.get("tuned_on", "")),
         date=str(entry.get("date", "")),

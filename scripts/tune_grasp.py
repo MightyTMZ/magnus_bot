@@ -151,6 +151,10 @@ def main(argv: list[str] | None = None, prompt=input) -> int:
     parser.add_argument("--pitches", default="25,30,35", help="grid: tilts to try, degrees from vertical")
     parser.add_argument("--z-offsets", default="0",
                         help="grid: grasp-height offsets to try, mm (+ = higher; write --z-offsets=-5,0)")
+    parser.add_argument("--side-offsets", default="0",
+                        help="grid: sideways aim offsets, mm (+ = toward the arm's LEFT, i.e. rank 1 for "
+                             "follower_1); the jaws open to one side, so dead centre can land a jaw on the "
+                             "piece. --search uses the first value")
     parser.add_argument("--search", action="store_true", help="search coarse to fine instead of a grid")
     parser.add_argument("--pitch-range", default="20,40", help="search: tilt range, degrees")
     parser.add_argument("--z-range", default=None,
@@ -198,7 +202,9 @@ def main(argv: list[str] | None = None, prompt=input) -> int:
         return check_vision(HttpBoardReader(args.vision_url), args.vision_timeout)
 
     try:
-        settings = [Setting(p, z) for p in _floats(args.pitches) for z in _floats(args.z_offsets)]
+        sides = _floats(args.side_offsets)
+        settings = [Setting(p, z, sd) for p in _floats(args.pitches) for z in _floats(args.z_offsets)
+                    for sd in sides]
         pitch_range = _range(args.pitch_range)
         z_range = _range(args.z_range) if args.z_range else None
         good_pitch = _range(args.sim_good_pitch) if args.sim_good_pitch else None
@@ -309,7 +315,8 @@ def main(argv: list[str] | None = None, prompt=input) -> int:
             if not rmap.can_reach(args.arm, chess.square_file(sq_index), chess.square_rank(sq_index)):
                 raise SettingInfeasible(f"{args.arm} cannot reach {sq}")
         sim_miss = good_pitch is not None and not good_pitch[0] <= setting.pitch_deg <= good_pitch[1]
-        shuttle = ArmShuttle(Executor(cfg, arms, rmap, pitch=pitch, grip_depth=grip_depth, **exec_kwargs),
+        shuttle = ArmShuttle(Executor(cfg, arms, rmap, pitch=pitch, grip_depth=grip_depth,
+                                      side_offset=setting.side_mm / 1000.0, **exec_kwargs),
                              piece, world, sim_miss)
         try:  # plan both directions now, so a too-steep tilt fails here and not mid-sweep
             for src, dst in ((home, away), (away, home)):
@@ -342,14 +349,15 @@ def main(argv: list[str] | None = None, prompt=input) -> int:
                 winner = refine_search(
                     home, away, args.trials, make_shuttle, reader, pitch_range=pitch_range,
                     z_range=z_range, coarse_points=args.coarse_points, min_step=scale,
-                    results=results, **common,
+                    side_mm=sides[0], results=results, **common,
                 )
             else:
                 run_sweep(settings, home, away, args.trials, make_shuttle, reader, results=results, **common)
                 winner = best_setting(results, scale)
             if args.save and winner is not None and winner.successes:
                 log({"event": "confirm", "time": time.time(), "pitch_deg": winner.setting.pitch_deg,
-                     "z_offset_mm": winner.setting.z_offset_mm, "attempts": args.confirm})
+                     "z_offset_mm": winner.setting.z_offset_mm, "side_mm": winner.setting.side_mm,
+                     "attempts": args.confirm})
                 run_sweep([winner.setting], home, away, args.confirm, make_shuttle, reader,
                           results=confirmation, **common)
         except TuningStopped as e:
@@ -388,7 +396,7 @@ def _save_winner(args, config_dir: Path, winner: SettingResult | None, check: Se
     confirmed = f"{check.successes}/{check.attempts}"
     path = save_tuned_grasp(config_dir, args.piece, TunedGrasp(
         pitch_deg=winner.setting.pitch_deg, z_offset_mm=winner.setting.z_offset_mm,
-        grip_depth_mm=args.grip_depth_mm,
+        grip_depth_mm=args.grip_depth_mm, side_offset_mm=winner.setting.side_mm,
         confirmed=confirmed, tuned_on=f"{args.arm} {args.uci}", date=time.strftime("%Y-%m-%d"),
     ), squares=args.save_squares)
     where = f" on {', '.join(args.save_squares)}" if args.save_squares else ""

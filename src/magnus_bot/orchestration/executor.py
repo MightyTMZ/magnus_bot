@@ -29,7 +29,7 @@ from dataclasses import dataclass
 import chess
 import numpy as np
 
-from magnus_bot.config import Config, GraspChoice
+from magnus_bot.config import ArmCorrection, Config, GraspChoice
 from magnus_bot.geometry import board as board_geom
 from magnus_bot.geometry.frames import arm_placements
 from magnus_bot.hardware.arm import Arm
@@ -185,11 +185,13 @@ def plan_joint_program(
     pitch: float = 0.0,
     grip_depth: float | None = None,
     tuned_grasps: bool = False,
+    side_offset: float = 0.0,
 ) -> list[ArmTrajectory]:
     """Joint trajectories for a whole program, each starting and ending at that arm's ``rest`` pose.
 
     ``pitch`` tilts the tool off vertical for every grasp waypoint (0 = top-down), holding the stem
-    ``grip_depth`` back from the jaw tips (default: the pads; :func:`tilted_tip_target`). With
+    ``grip_depth`` back from the jaw tips (default: the pads; :func:`tilted_tip_target`), aimed
+    ``side_offset`` to the arm's left of each square (the jaws open to one side of the aim). With
     ``tuned_grasps``, each transfer instead tries the piece's tuned grasps (configs/grasp.yaml:
     per-square overrides for its squares first, then the piece's default) and takes the first that
     plans at BOTH ends. Raises :class:`Unreachable` or :class:`JointLimitError` (with arm, transfer
@@ -202,7 +204,7 @@ def plan_joint_program(
         piece = piece_name(arm_steps.transfer.piece_symbol)
         choices = config.grasp_choices(piece, transfer_squares(arm_steps.transfer)) if tuned_grasps else []
         if not choices:
-            choices = [GraspChoice(pitch, None, grip_depth, "as given")]  # type: ignore[arg-type]
+            choices = [GraspChoice(pitch, None, grip_depth, "as given", side_offset)]  # type: ignore[arg-type]
         first_error: Exception | None = None
         for choice in choices:
             try:
@@ -237,8 +239,9 @@ def _arm_waypoints(arm_steps, config, home, placement, kinematics, limits, to_co
         where = f"{arm_steps.arm_id} {arm_steps.transfer.reason} {step.phase.value}"
         x, y = placement.board_to_arm(step.xyz[:2])
         z = choice.z if choice.z is not None and step.phase in at_grasp else step.xyz[2]
-        target = correction.apply(tilted_tip_target(np.array([x, y, z]), choice.pitch,
-                                                    kinematics.model.tip_to_pad, choice.grip_depth))
+        aim = ArmCorrection(side=choice.side).apply(np.array([x, y, z]))  # the jaws open sideways
+        target = correction.apply(tilted_tip_target(aim, choice.pitch, kinematics.model.tip_to_pad,
+                                                    choice.grip_depth))
         tip_z = target[2] - correction.z  # where the real (sagging) tip goes
         if tip_z < TABLE_CLEARANCE:
             raise Unreachable(f"{where}: the fingertip would be {tip_z * 1000:.1f} mm above the board "
@@ -276,12 +279,14 @@ class Executor:
         pitch: float = 0.0,
         grip_depth: float | None = None,
         tuned_grasps: bool = False,
+        side_offset: float = 0.0,
     ) -> None:
         if live and simulate:
             raise ValueError("choose live or simulate, not both")
         self.pitch = pitch
         self.grip_depth = grip_depth
         self.tuned_grasps = tuned_grasps  # per-transfer grasps from configs/grasp.yaml
+        self.side_offset = side_offset  # explicit mode: aim this far to the arm's left (m)
         self.config = config
         self.arms = arms
         self.rmap = rmap
@@ -323,7 +328,7 @@ class Executor:
         rest = {arm_id: self.arms[arm_id].read_joints() for arm_id in used}
         return plan_joint_program(
             program, self.config, rest, self.kinematics, self.limits, self.to_command,
-            self.hz, self.pitch, self.grip_depth, self.tuned_grasps,
+            self.hz, self.pitch, self.grip_depth, self.tuned_grasps, self.side_offset,
         )
 
     def run(self, trajectories: list[ArmTrajectory]) -> None:

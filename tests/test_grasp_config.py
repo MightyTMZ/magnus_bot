@@ -113,7 +113,18 @@ def test_a_move_touching_an_override_square_tries_the_override_first(config_dir)
 
 
 def test_each_piece_closes_the_gripper_to_its_own_hold(config_dir):
+    import dataclasses
+
     config = load_config(config_dir(measured=False))
     assert config.gripper_closed_for("rook") == config.board.gripper_closed_pct["rook"]
-    assert config.board.gripper_closed_pct.get("pawn") is None
-    assert config.gripper_closed_for("pawn") == config.arms.gripper_closed  # unmeasured: the default
+    assert config.gripper_closed_for("pawn") == config.board.gripper_closed_pct["pawn"]  # 3.1, measured
+    unmeasured = dataclasses.replace(config, board=dataclasses.replace(
+        config.board, gripper_closed_pct={**config.board.gripper_closed_pct, "pawn": None}))
+    assert unmeasured.gripper_closed_for("pawn") == config.arms.gripper_closed  # falls back to the default
+
+
+def test_side_offset_is_saved_with_the_grasp(config_dir):
+    cfg = config_dir(measured=False)
+    save_tuned_grasp(cfg, "rook", TunedGrasp(pitch_deg=60.0, z_offset_mm=-9.0, side_offset_mm=5.0))
+    (choice,) = load_config(cfg).grasp_choices("rook", ["f4", "f5"])
+    assert choice.side == pytest.approx(0.005)

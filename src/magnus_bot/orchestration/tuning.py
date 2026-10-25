@@ -23,6 +23,7 @@ so does :class:`~magnus_bot.vision.observation.VisionUnavailable`.
 
 from __future__ import annotations
 
+import dataclasses
 import math
 import time
 from collections import Counter
@@ -44,13 +45,15 @@ from magnus_bot.vision.verify import (
 
 @dataclass(frozen=True)
 class Setting:
-    """One point of the sweep: tool tilt and a grasp-height offset."""
+    """One point of the sweep: tool tilt, a grasp-height offset and a sideways grasp offset."""
 
     pitch_deg: float
     z_offset_mm: float = 0.0
+    side_mm: float = 0.0  # + = toward the arm's left (the jaws open to one side of the aim point)
 
     def label(self) -> str:
-        return f"pitch {self.pitch_deg:g} deg, z {self.z_offset_mm:+g} mm"
+        side = f", side {self.side_mm:+g} mm" if self.side_mm else ""
+        return f"pitch {self.pitch_deg:g} deg, z {self.z_offset_mm:+g} mm{side}"
 
 
 class SettingInfeasible(Exception):
@@ -250,6 +253,7 @@ def refine_search(
     z_range: tuple[float, float] | None = None,
     coarse_points: int = 5,
     min_step: tuple[float, float] = (1.0, 1.0),
+    side_mm: float = 0.0,
     results: list[SettingResult] | None = None,
     log: Callable[[dict], None] = lambda record: None,
     clock: Callable[[], float] = time.time,
@@ -297,7 +301,7 @@ def refine_search(
             run([s for s in near if lo - 1e-9 <= _coords(s)[axis] <= hi + 1e-9], name, step)
 
     z0 = 0.0 if z_range is None else min(max(0.0, z_range[0]), z_range[1])
-    best = search_axis(0, *pitch_range, Setting(pitch_range[0], z0))
+    best = search_axis(0, *pitch_range, Setting(pitch_range[0], z0, side_mm))
     if best is None or best.successes == 0:
         return None
     if z_range is not None:
@@ -306,7 +310,7 @@ def refine_search(
 
 
 def _fields(setting: Setting) -> dict:
-    return {"pitch_deg": setting.pitch_deg, "z_offset_mm": setting.z_offset_mm}
+    return {"pitch_deg": setting.pitch_deg, "z_offset_mm": setting.z_offset_mm, "side_mm": setting.side_mm}
 
 
 def _coords(setting: Setting) -> tuple[float, float]:
@@ -316,7 +320,8 @@ def _coords(setting: Setting) -> tuple[float, float]:
 def _with(setting: Setting, axis: int, value: float) -> Setting:
     """``setting`` with coordinate ``axis`` (0 tilt, 1 z) set to ``value``, rounded for clean keys."""
     value = round(value, 2)
-    return Setting(value, setting.z_offset_mm) if axis == 0 else Setting(setting.pitch_deg, value)
+    field_name = "pitch_deg" if axis == 0 else "z_offset_mm"
+    return dataclasses.replace(setting, **{field_name: value})
 
 
 def best_setting(

@@ -61,9 +61,9 @@ grasp_height:
 # per piece (stem diameter), so it's recorded per type here. Measure each with
 # scripts/gripper_read.py (close on that piece's stem). Fill the nulls to help flip measured:true.
 gripper_closed_pct:
-  pawn: null     # TODO measure
-  knight: null   # TODO measure
-  bishop: null   # TODO measure
+  pawn: 3.10     # MEASURED 2026-10-25 (follower_1, by hand on the stem, gripper_read.py)
+  knight: 9.25   # MEASURED 2026-10-25
+  bishop: 6.0    # MEASURED 2026-10-25
   rook: 4.15     # MEASURED 2026-10-24 (follower_1, firm hold on the rook stem)
-  queen: null    # TODO measure
-  king: null     # TODO measure
+  queen: 9.0     # MEASURED 2026-10-25
+  king: 10.00    # MEASURED 2026-10-25

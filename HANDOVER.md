@@ -119,6 +119,14 @@ base 0.078 + the arm falling 33 mm short (`arms.reach_correction`) + 2 mm right 
   - **Rook default saved** (configs/grasp.yaml): 60 deg, pads, z -9: 9/10 live across g3g4, g4g5,
     g5g6 (-9: 5/6; -12, -6: 2/2 each). Sim: also plans on f4f5, e4e5.
 
+- **Gripper holds measured** (by hand, gripper_read.py): pawn 3.10, knight 9.25, bishop 6.0, rook
+  4.15, queen 9.0, king 10.00 % (board.yaml).
+- **Sideways grasp offset:** f4f5 at the rook default still closed toward rank 8. Operator: the
+  jaws have width; aiming the point dead centre can put a jaw on the piece. Grasps now carry
+  `side_offset_mm` (+ = arm's left; rank 1 for follower_1), applied before the arm correction, so
+  the REAL tip moves square to the reach. `tune_grasp.py --side-offsets 3,6,9` sweeps it; --save
+  stores it with the grasp (per piece / per square).
+
 ## Earlier session (2026-10-24, Alex + Claude, part 2) — reach probe, geometry calibrated
 - **Why:** after the live tuning run missed every time, the camera could only say "not picked".
   Measuring WHERE the arm goes split the miss into motors vs geometry.

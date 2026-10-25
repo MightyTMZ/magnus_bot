@@ -3,6 +3,7 @@
 import dataclasses
 
 import chess
+import numpy as np
 import pytest
 
 from magnus_bot.cli import _full_reach_map
@@ -20,6 +21,7 @@ from magnus_bot.orchestration.executor import (
     build_move_program,
     check_limits,
 )
+from magnus_bot.orchestration.probe import split_mm
 
 
 def test_build_program_normal_move_is_one_sequence():
@@ -281,3 +283,22 @@ def test_tuned_grasps_use_the_square_override_at_both_ends(config_dir):
     assert near[0].grasp == "rook @ h4"  # g4 -> h4 takes the near-vertical grasp at BOTH ends
     far = executor.plan(build_move_program(board, chess.Move.from_uci("g4g5"), executor.rmap, config))
     assert far[0].grasp == "rook default"
+
+
+def test_side_offset_aims_to_the_arms_left_of_the_square():
+    # follower_1 faces -x, so its left is -y (toward rank 1): a +5 mm offset aims 5 mm toward rank 1.
+    config = _low_clear()
+    tips = {}
+    for side in (0.0, 0.005):
+        arms, executor = _sim(config, side_offset=side)
+        executor.execute_move(ROOK_H4, H4H5)
+        hold = config.gripper_closed_for("rook")
+        grip = next(c for c in arms["follower_1"].command_log if c["gripper"] == hold)
+        tip = SO101Kinematics().forward(urdf_to_model(grip))
+        tips[side] = config.arms.correction("follower_1").undo(tip)  # where the real tip lands
+    placement = arm_placements(config.board.square_size, config.arms.edge_gap)["follower_1"]
+    before, after = placement.arm_to_board(tips[0.0][:2]), placement.arm_to_board(tips[0.005][:2])
+    reach_dir = (before - placement.base_xy) / np.linalg.norm(before - placement.base_xy)
+    # 5 mm square to the reach, to the arm's left (h4 is ~15 deg off the arm's centre line).
+    assert split_mm(after - before, reach_dir) == pytest.approx((0.0, 5.0), abs=0.3)
+    assert after[1] < before[1]  # i.e. toward rank 1
