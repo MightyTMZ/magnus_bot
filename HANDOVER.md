@@ -151,6 +151,11 @@ base 0.078 + the arm falling 33 mm short (`arms.reach_correction`) + 2 mm right 
   LeRobot calibration; up to 2.5 deg past a stop still counts, so the rook's 60 deg on g stays).
   Sim: g2g4 / f2f4 / e2e4 at 45; h2h3 eased to 40, h2h4 / h3h4 / h4h5 to 30.
 
+- **FIRST REAL GAME MOVES (2026-10-25): h2h3, g2g3, f2f4, e2e4, Nf3 from the start position,
+  camera-graded, "basically perfect"** (play_moves.py). Before that, h2h3 eased to 40 deg came up
+  3.4 deg short at the drop-off (arrival check held it): STOP_SLACK 2.5 -> 1.6 deg; h3 now 35 deg.
+  Then the opening jaws knocked neighbours: gripper_open 35 -> 26 %.
+
 ## Earlier session (2026-10-24, Alex + Claude, part 2) — reach probe, geometry calibrated
 - **Why:** after the live tuning run missed every time, the camera could only say "not picked".
   Measuring WHERE the arm goes split the miss into motors vs geometry.

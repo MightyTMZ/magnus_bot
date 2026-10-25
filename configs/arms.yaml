@@ -50,8 +50,9 @@ z_grasp: 0.028
 # Gripper positions (percent). gripper_open is a single safe-wide value. gripper_closed here is
 # the DEFAULT (pawn) hold; per-piece closed values live in board.yaml:gripper_closed_pct (they
 # differ by piece) and will supersede this default when per-piece grasp lands (M2/M3).
-gripper_open: 35.0       # follower_1 approach width (2026-10-24): wide enough to drop around a
-                         # stem but NOT full-open (77) — full-open fouls neighbouring pieces.
+gripper_open: 26.0       # follower_1 approach width. 35 (2026-10-24) still knocked neighbouring
+                         # pieces as the jaws opened (first real game moves, 2026-10-25): -25%.
+                         # Full-open (77) fouls neighbours badly.
 gripper_closed: 4.15     # MEASURED 2026-10-24: ROOK hold (the first-move test piece). Per-piece
                          # values live in board.yaml:gripper_closed_pct; this default = rook for now.
 
