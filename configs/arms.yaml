@@ -27,6 +27,7 @@ side_correction:    # the arm lands this much to its RIGHT (+ = command further 
   follower_1: 0.007  # toward rank 1; f-file grasps closed toward rank 8 at 0.002
 z_correction:       # the arm sits this much LOWER than the model
   follower_1: 0.005
+  follower_2: 0.006  # ruler, first follower_2 probe 2026-10-25 (-6.2 mm on average)
 
 # Every grasp aims this far to the arm's LEFT of the square's centre (m; rank 1 for follower_1), on
 # top of each tuned grasp's own side_offset_mm. The jaws open to one side of the aim point, so dead
