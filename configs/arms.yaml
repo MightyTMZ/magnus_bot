@@ -40,11 +40,14 @@ z_correction:       # the arm sits this much LOWER than the model
 # heads; operator: +2-3 mm more -> 3 mm.
 # Per arm, per square: [reach, side] mm added to the aim at that square only (pick or place, any
 # piece); + = further from the arm / to its left. For single squares where an arm lands a bit off.
+# "square:piece" (e.g. "e3:bishop") applies to that piece only and wins over the plain square.
 square_nudge_mm:
   follower_1:
     f7: [4, -4]  # 2026-10-25: the queen landed short and left of f7 (Qxf7); operator: front-right
     e3: [0, 2]   # 2026-10-25: picking the queen off the pad (Qh5 leg 2): 2 mm more on top of the
                  # queen's h5 offset (6 -> 8 mm at e3; h5 keeps 6)
+    "e3:bishop": [4, -4]  # 2026-10-25: Bc4's drop-off on the pad landed short of the square:
+                          # release further toward the a-file (reach) and rank 8 (the arm's right)
 
 grasp_side_offset:
   follower_1: 0.003

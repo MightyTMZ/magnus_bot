@@ -97,9 +97,11 @@ UP_PHASES = (Phase.LIFT, Phase.RETRACT)
 # the quick elbow drop the gripper onto the piece just placed; short steps along a line keep every
 # command close to the last, so a lagging joint cannot swing the gripper far.
 PAD_LIFT_Z = 0.13
+PAD_LIFT_HEIGHTS = (PAD_LIFT_Z, 0.12, 0.11, 0.10)  # highest first; far pads may only allow less
 PULLBACK_STEP = 0.02
 PULLBACK_TO = 0.15
 PULLBACK_SPEED = 0.6
+PLACE_SPEED = 0.6  # the last descent before letting go: settle the piece onto the square gently
 # Before handing over, a finished arm must have STOPPED moving (a lagging shoulder kept swinging
 # while the other arm reached in): read-backs this close for STILL_FOR, at most STILL_TIMEOUT.
 STILL_TOLERANCE = math.radians(0.5)
@@ -277,7 +279,7 @@ def plan_joint_program(
         else:
             raise first_error  # type: ignore[misc]
         speedup = {"travel": config.arms.travel_speedup, "rise": config.arms.rise_speedup,
-                   "pullback": PULLBACK_SPEED}
+                   "pullback": PULLBACK_SPEED, "place": PLACE_SPEED}
         samples, at = plan_joint_trajectory_indexed(waypoints, config.arms.speed_scale, hz,
                                                     segment_scales=[speedup.get(k, 1.0) for k in travel],
                                                     pass_through=pass_through)
@@ -318,7 +320,15 @@ def _arm_waypoints(arm_steps, config, home, placement, kinematics, limits, to_co
     phase_nudge = {}  # phase -> (reach, side) for the square that step sits over
     for end, loc in (("src", arm_steps.transfer.src), ("dst", arm_steps.transfer.dst)):
         if loc.kind == SQUARE and loc.square is not None:
-            nudge = nudges.get(chess.square_name(chess.square(*loc.square)))
+            name = chess.square_name(chess.square(*loc.square))
+        elif loc.kind == PAD:  # the pad is a board square too (e3): its nudges apply there
+            f, r = int(config.handoff.pad.x // config.board.square_size), int(config.handoff.pad.y //
+                                                                              config.board.square_size)
+            name = chess.square_name(chess.square(f, r)) if 0 <= f < 8 and 0 <= r < 8 else None
+        else:
+            name = None
+        if name is not None:
+            nudge = nudges.get(f"{name}:{piece}", nudges.get(name))  # a piece's own nudge wins
             if nudge:
                 phase_nudge.update({ph: nudge for ph in SQUARE_PHASES[end]})
     gripper = home["gripper"]
@@ -396,11 +406,10 @@ def _arm_waypoints(arm_steps, config, home, placement, kinematics, limits, to_co
             raise JointLimitError(f"{where}: {exc} [{choice.label}]") from exc
         if step.phase == Phase.RETRACT and arm_steps.transfer.dst.kind == PAD:
             pullback = []  # off the pad: lift higher, then a straight line back toward the base
-            for k in range(int(math.hypot(*aim[:2]) / PULLBACK_STEP) + 1):
-                r = math.hypot(*aim[:2]) - k * PULLBACK_STEP
-                if r < PULLBACK_TO:
-                    break
-                point = np.array([*(aim[:2] * r / math.hypot(*aim[:2])), PAD_LIFT_Z])
+            r0 = math.hypot(*aim[:2])
+
+            def line_point(r: float, z: float, aim=aim, r0=r0, gripper=gripper) -> dict[str, float] | None:
+                point = np.array([*(aim[:2] * r / r0), z])
                 try:
                     tip = correction.apply(tilted_tip_target(point, choice.pitch, kinematics.model.tip_to_pad,
                                                              choice.grip_depth))
@@ -408,10 +417,19 @@ def _arm_waypoints(arm_steps, config, home, placement, kinematics, limits, to_co
                     cmd["gripper"] = gripper
                     check_limits(cmd, limits)
                 except (Unreachable, JointLimitError):
-                    break  # as far back as this tilt goes
-                pullback.append(cmd)
+                    return None
+                return cmd
+
+            # the highest lift the arm can hold above the pad at this tilt (13 cm when it can)
+            lift_z = next((z for z in PAD_LIFT_HEIGHTS if line_point(r0, z) is not None), None)
+            if lift_z is not None:
+                for k in range(int(r0 / PULLBACK_STEP) + 1):
+                    r = r0 - k * PULLBACK_STEP
+                    if r < PULLBACK_TO or (cmd := line_point(r, lift_z)) is None:
+                        break  # as far back as this tilt goes
+                    pullback.append(cmd)
             if pullback:
-                command = pullback[0]  # the lift (straight up, to PAD_LIFT_Z)
+                command = pullback[0]  # the lift (straight up above the pad)
         past = {n: math.degrees(max(stops[n].lo - v, v - stops[n].hi)) for n, v in command.items()
                 if stops and n in stops and not stops[n].lo - STOP_SLACK <= v <= stops[n].hi + STOP_SLACK}
         if past:
@@ -419,7 +437,7 @@ def _arm_waypoints(arm_steps, config, home, placement, kinematics, limits, to_co
             raise BeyondServoStop(f"{where}: past the servo stop by {detail} [{choice.label}]")
         waypoints.append(command)
         travel.append("travel" if step.phase in TRAVEL_PHASES else "rise" if step.phase in UP_PHASES
-                      else "near")
+                      else "place" if step.phase == Phase.DESCEND_PLACE else "near")
         if step.phase in UP_PHASES:  # up first: no sideways move before the arm is really up
             checkpoints.append((len(waypoints) - 1, step.phase.value))
         if step.phase == Phase.RETRACT and arm_steps.transfer.dst.kind == PAD and len(pullback) > 1:

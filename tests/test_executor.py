@@ -442,7 +442,7 @@ def test_off_the_pad_the_arm_lifts_then_pulls_straight_back_toward_its_base(conf
     gates = {phase: i for i, phase in traj.checkpoints if phase != "dwell"}
     fix, kin = config.arms.correction("follower_1"), SO101Kinematics()
     tips = [fix.undo(kin.forward(urdf_to_model(s))) for s in traj.samples[gates["retract"]:]]
-    assert tips[0][2] >= PAD_LIFT_Z  # lifted to ~13 cm first (the tilted tip sits a little higher)...
+    assert tips[0][2] >= PAD_LIFT_Z - 0.03  # lifted to 10-13 cm first (the highest the arm holds there)...
     assert all(abs(t[2] - tips[0][2]) < 0.005 for t in tips)  # ...then straight back at that height...
     radii = [np.hypot(t[0], t[1]) for t in tips]
     assert all(b <= a + 1e-4 for a, b in zip(radii, radii[1:], strict=False))  # ...only ever toward the base
@@ -488,3 +488,31 @@ def test_the_other_arm_is_not_started_if_the_first_did_not_pull_back_off_the_pad
         executor.run(trajectories)
     assert all(c == arms["follower_2"].command_log[0] for c in arms["follower_2"].command_log)
     assert len(arms["follower_2"].command_log) <= 1  # only told to hold where it was: it never moved
+
+
+def test_a_piece_specific_square_nudge_beats_the_plain_one(config_dir):
+    from magnus_bot.config import TunedGrasp, save_tuned_grasp
+
+    cfg_dir = config_dir(measured=False)
+    save_tuned_grasp(cfg_dir, "bishop", TunedGrasp(pitch_deg=40.0, z_offset_mm=0.0))
+    base = load_config(cfg_dir)
+    base = dataclasses.replace(base, arms=dataclasses.replace(base.arms, z_clear=0.10))
+    rmap = ReachabilityMap(reachable={"follower_1": {(5, 0)}, "follower_2": {(2, 3)}},
+                           pad_reach={"follower_1", "follower_2"})
+    board = chess.Board("rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2")
+    tips = {}
+    for label, nudge in (("plain", {"e3": (0.0, 0.002)}),
+                         ("bishop", {"e3": (0.0, 0.002), "e3:bishop": (0.004, -0.004)})):
+        arms_cfg = dataclasses.replace(base.arms, square_nudge={"follower_1": nudge})
+        cfg = dataclasses.replace(base, arms=arms_cfg)
+        arms, _ = _sim(cfg)
+        executor = Executor(cfg, arms, _full_reach_map(cfg), simulate=True, tuned_grasps=True)
+        traj = executor.plan([build_move_program(board, chess.Move.from_uci("f1c4"), rmap, cfg)[0]])[0]
+        release = {phase: i for i, phase in traj.checkpoints}["release"]
+        tip = SO101Kinematics().forward(urdf_to_model(traj.samples[release]))
+        tips[label] = cfg.arms.correction("follower_1").undo(tip)[:2]
+    reach_dir = tips["plain"] / np.linalg.norm(tips["plain"])
+    moved = tips["bishop"] - tips["plain"]
+    assert moved @ reach_dir == pytest.approx(0.004, abs=5e-4)  # further toward the a-file...
+    left = np.array([-reach_dir[1], reach_dir[0]])
+    assert moved @ left == pytest.approx(-0.006, abs=5e-4)  # ...and 4 mm right instead of the plain 2 mm left
