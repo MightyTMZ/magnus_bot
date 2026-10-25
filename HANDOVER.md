@@ -88,6 +88,12 @@ tip landed +29 +/- 2 mm toward follower_1's base on g3/f4/h4/f6: a GEOMETRY erro
   (40-70 deg) plan at g4/g5 (80 hits the wrist limit). tune_grasp's scrape guard now checks the
   TILTED tip height, so pads can go lower when level. Camera cannot tell a head grab from a stem
   grab (both move the rook): watch the grasps.
+- **Level grasps WORK: 9/10 on g4<->g5** (50/-6, 60/-12, 60/-6, 70/-12 all 2/2; 70/-6 1/2).
+  Operator: the rook is now held BY ITS STEM; best was 50 deg, pads -6 mm. The stem sits at the
+  deep (servo) end of the jaws. New `grip_depth` (how far back from the tips the stem is held;
+  default the pads, 23 mm) threads through tilted_tip_target, the reach map, the executor,
+  tune_grasp `--grip-depth-mm`, TunedGrasp and first_move. With level grasps follower_1 reaches the
+  whole f and e files and most of d (f4f5 and e4e5 plan at 50-70 deg, depth 23 or 15).
 
 ## Earlier session (2026-10-24, Alex + Claude) — vision online, closed grasp-tuning loop
 - **Why:** live grasps kept missing (g3g4 at 20° tilt failed twice) and every miss had to be

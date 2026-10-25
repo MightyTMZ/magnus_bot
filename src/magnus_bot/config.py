@@ -90,6 +90,7 @@ class TunedGrasp:
 
     pitch_deg: float
     z_offset_mm: float = 0.0
+    grip_depth_mm: float | None = None  # stem this far back from the jaw tips; None = at the pads
     confirmed: str = ""  # e.g. "10/10"
     tuned_on: str = ""  # e.g. "follower_1 g3g4"
     date: str = ""
@@ -112,6 +113,11 @@ class Config:
         if tuned is None:
             return default_pitch, z
         return math.radians(tuned.pitch_deg), z + tuned.z_offset_mm / 1000.0
+
+    def grip_depth_for(self, piece: str) -> float | None:
+        """Where ``piece``'s stem sits in the jaws (m back from the tips), or None for the pads."""
+        tuned = self.grasp_tuning.get(piece)
+        return None if tuned is None or tuned.grip_depth_mm is None else tuned.grip_depth_mm / 1000.0
 
     def require_measured(self) -> None:
         """Raise unless the rig has been measured. Call before any live motion."""
@@ -241,6 +247,7 @@ def _load_grasp_tuning(path: Path) -> dict[str, TunedGrasp]:
         tuned[piece] = TunedGrasp(
             pitch_deg=_float(entry, "pitch_deg"),
             z_offset_mm=float(entry.get("z_offset_mm", 0.0)),
+            grip_depth_mm=None if entry.get("grip_depth_mm") is None else float(entry["grip_depth_mm"]),
             confirmed=str(entry.get("confirmed", "")),
             tuned_on=str(entry.get("tuned_on", "")),
             date=str(entry.get("date", "")),

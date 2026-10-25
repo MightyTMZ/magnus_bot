@@ -139,3 +139,18 @@ def test_tilted_grasp_keeps_the_jaw_pads_on_the_stem(deg):
     pad = tip - tp * (tip - wrist) / np.linalg.norm(tip - wrist)
     assert pad == pytest.approx(top_down_tip + np.array([0.0, 0.0, tp]), abs=1e-6)
     assert tip[2] >= top_down_tip[2] - 1e-9  # tilting never lowers the tip toward the board
+
+
+@pytest.mark.parametrize("deg", [0, 50, 60])
+def test_shallower_grip_holds_the_stem_nearer_the_tips(deg):
+    # Hold the stem 12 mm back from the tips instead of at the pads (23 mm): same grip point, tip
+    # pulled in toward it, so far squares need less reach.
+    kin = SO101Kinematics()
+    tp, pitch, depth = kin.model.tip_to_pad, math.radians(deg), 0.012
+    top_down_tip = np.array([0.20, 0.03, 0.005])
+    grip_point = top_down_tip + np.array([0.0, 0.0, tp])
+    target = tilted_tip_target(top_down_tip, pitch, tp, depth)
+    wrist, tip = kin.link_points(kin.inverse(target, pitch=pitch))[2:]
+    held = tip - depth * (tip - wrist) / np.linalg.norm(tip - wrist)
+    assert held == pytest.approx(grip_point, abs=1e-6)
+    assert np.hypot(*tip[:2]) <= np.hypot(*tilted_tip_target(top_down_tip, pitch, tp)[:2]) + 1e-9

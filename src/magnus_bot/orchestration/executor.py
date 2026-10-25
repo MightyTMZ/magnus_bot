@@ -152,11 +152,12 @@ def plan_joint_program(
     to_command: JointMap | None = None,
     hz: float = 30.0,
     pitch: float = 0.0,
+    grip_depth: float | None = None,
 ) -> list[ArmTrajectory]:
     """Joint trajectories for a whole program, each starting and ending at that arm's ``rest`` pose.
 
-    ``pitch`` tilts the tool off vertical for every grasp waypoint (0 = top-down), keeping the jaw
-    pads where a top-down grasp would put them (:func:`tilted_tip_target`). Raises
+    ``pitch`` tilts the tool off vertical for every grasp waypoint (0 = top-down), holding the stem
+    ``grip_depth`` back from the jaw tips (default: the pads; :func:`tilted_tip_target`). Raises
     :class:`Unreachable` or :class:`JointLimitError` (with arm, transfer and phase) if any waypoint
     cannot be commanded. Pure: nothing is sent to any arm.
     """
@@ -174,7 +175,8 @@ def plan_joint_program(
                 gripper = config.arms.gripper_closed
             where = f"{arm_steps.arm_id} {arm_steps.transfer.reason} {step.phase.value}"
             x, y = placement.board_to_arm(step.xyz[:2])
-            target = tilted_tip_target(np.array([x, y, step.xyz[2]]), pitch, kinematics.model.tip_to_pad)
+            target = tilted_tip_target(np.array([x, y, step.xyz[2]]), pitch, kinematics.model.tip_to_pad,
+                                       grip_depth)
             target[2] += config.arms.z_correction.get(arm_steps.arm_id, 0.0)  # the arm sits low
             try:
                 model = kinematics.inverse(target, pitch=pitch)
@@ -208,10 +210,12 @@ class Executor:
         kinematics: SO101Kinematics | None = None,
         hz: float = 30.0,
         pitch: float = 0.0,
+        grip_depth: float | None = None,
     ) -> None:
         if live and simulate:
             raise ValueError("choose live or simulate, not both")
         self.pitch = pitch
+        self.grip_depth = grip_depth
         self.config = config
         self.arms = arms
         self.rmap = rmap
@@ -253,7 +257,7 @@ class Executor:
         rest = {arm_id: self.arms[arm_id].read_joints() for arm_id in used}
         return plan_joint_program(
             program, self.config, rest, self.kinematics, self.limits, self.to_command,
-            self.hz, self.pitch,
+            self.hz, self.pitch, self.grip_depth,
         )
 
     def run(self, trajectories: list[ArmTrajectory]) -> None:

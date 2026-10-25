@@ -74,3 +74,11 @@ def test_explicit_pitch_overrides_the_tuned_tilt(first_move, config_dir, capsys)
     save_tuned_grasp(cfg, "rook", TunedGrasp(pitch_deg=30.0))
     assert first_move.main(["--config-dir", str(cfg), "--pitch", "25"]) == 0
     assert "25 deg tilt (--pitch)" in capsys.readouterr().out
+
+
+def test_grip_depth_is_saved_and_read_back(config_dir):
+    cfg = config_dir(measured=False)
+    save_tuned_grasp(cfg, "rook", TunedGrasp(pitch_deg=50.0, z_offset_mm=-6.0, grip_depth_mm=12.0))
+    config = load_config(cfg)
+    assert config.grip_depth_for("rook") == pytest.approx(0.012)
+    assert config.grip_depth_for("king") is None  # untuned: stem at the pads

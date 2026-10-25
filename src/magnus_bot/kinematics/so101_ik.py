@@ -30,21 +30,25 @@ from magnus_bot.kinematics.model import SO101Model
 IK_JOINTS = ("shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll")
 
 
-def tilted_tip_target(top_down_tip: np.ndarray, pitch: float, tip_to_pad: float) -> np.ndarray:
-    """Fingertip target (arm frame) that keeps the jaw PADS where a top-down grasp puts them.
+def tilted_tip_target(
+    top_down_tip: np.ndarray, pitch: float, tip_to_pad: float, grip_depth: float | None = None
+) -> np.ndarray:
+    """Fingertip target (arm frame) that holds the stem at the right spot in the jaws.
 
-    Grasp heights are fingertip targets for a top-down grasp, with the pads ``tip_to_pad`` straight
-    above. Tilting the tool by ``pitch`` swings the pads back toward the base, so the jaws would close
-    ``tip_to_pad * sin(pitch)`` in front of the stem (10-13 mm at 25-35 deg: the 2026-10-24 live
-    misses). To keep the pads on the stem, the tip moves out along the reach by that much and up by
-    ``tip_to_pad * (1 - cos(pitch))``.
+    Grasp heights are fingertip targets for a top-down grasp with the pads ``tip_to_pad`` straight
+    above, so the GRIP POINT on the piece is ``top_down_tip + tip_to_pad`` up. The stem is held
+    ``grip_depth`` back from the tip along the tool (default ``tip_to_pad``: the pads; less = nearer
+    the tips, which saves reach on far squares). Tilting the tool by ``pitch`` keeps that point on
+    the grip point: the tip sits ``grip_depth`` beyond it, out along the reach and down. Aiming the
+    tip itself at the square instead closed the jaws 10-13 mm in front of the stem (2026-10-24 live).
     """
-    if pitch == 0.0:
+    depth = tip_to_pad if grip_depth is None else grip_depth
+    if pitch == 0.0 and depth == tip_to_pad:
         return np.asarray(top_down_tip, dtype=float)
     x, y, z = (float(v) for v in top_down_tip)
     r = math.hypot(x, y)
-    out = tip_to_pad * math.sin(pitch)
-    return np.array([x + out * x / r, y + out * y / r, z + tip_to_pad * (1.0 - math.cos(pitch))])
+    out = depth * math.sin(pitch)
+    return np.array([x + out * x / r, y + out * y / r, z + tip_to_pad - depth * math.cos(pitch)])
 
 
 class Unreachable(ValueError):

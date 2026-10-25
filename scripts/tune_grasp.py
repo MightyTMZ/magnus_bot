@@ -158,6 +158,9 @@ def main(argv: list[str] | None = None, prompt=input) -> int:
     parser.add_argument("--confirm", type=int, default=10, help="fresh attempts to confirm the winner")
     parser.add_argument("--min-success", type=float, default=0.9,
                         help="confirmation success rate needed to save (0..1)")
+    parser.add_argument("--grip-depth-mm", type=float, default=None,
+                        help="hold the stem this far back from the jaw tips (default: the pads, 23 mm); "
+                             "less = nearer the tips, which saves reach on far squares")
     parser.add_argument("--trials", type=int, default=6, help="graded attempts per setting")
     parser.add_argument("--hover", type=float, default=0.06, help="hover height, m (see first_move.py)")
     parser.add_argument("--no-shuttle-back", action="store_true",
@@ -200,6 +203,7 @@ def main(argv: list[str] | None = None, prompt=input) -> int:
     if args.arm not in config.arms.arms:
         parser.error(f"unknown arm {args.arm!r}; configured: {sorted(config.arms.arms)}")
     base_z = config.board.grasp_height.get(args.piece, config.arms.z_grasp)
+    grip_depth = None if args.grip_depth_mm is None else args.grip_depth_mm / 1000.0
     kin = SO101Kinematics()
     placements = {args.arm: arm_placements(config.board.square_size, config.arms.edge_gap)[args.arm]}
     piece = chess.Piece(PIECES[args.piece], chess.WHITE)
@@ -257,22 +261,24 @@ def main(argv: list[str] | None = None, prompt=input) -> int:
     def make_shuttle(setting: Setting) -> ArmShuttle:
         pitch = math.radians(setting.pitch_deg)
         z_grasp = base_z + setting.z_offset_mm / 1000.0
-        # Tilting keeps the pads in place and lifts the tip (tilted_tip_target), so a level grasp can
-        # lower the pads onto a short stem while the tip itself stays clear of the board.
-        tip_z = z_grasp + kin.model.tip_to_pad * (1.0 - math.cos(pitch))
+        # The grip point is tip_to_pad above the top-down tip; the tip sits grip_depth down the tool
+        # from it (tilted_tip_target). Level and shallow grips lift the tip, so the pads can go lower.
+        depth = kin.model.tip_to_pad if grip_depth is None else grip_depth
+        tip_z = z_grasp + kin.model.tip_to_pad - depth * math.cos(pitch)
         if tip_z < MIN_FINGERTIP_Z:
             raise SettingInfeasible(f"fingertip would be {tip_z * 1000:.1f} mm above the board "
                                     f"(< {MIN_FINGERTIP_Z * 1000:.0f} mm: the jaw tips would scrape)")
         cfg = dataclasses.replace(config, arms=dataclasses.replace(
             config.arms, z_grasp=z_grasp, z_clear=args.hover))
         rmap = compute_reachability(placements, kin, cfg.arms.z_grasp, cfg.board.square_size,
-                                    z_clear=cfg.arms.z_clear, max_pitch=pitch)
+                                    z_clear=cfg.arms.z_clear, max_pitch=pitch, grip_depth=grip_depth)
         for sq in (home, away):
             sq_index = chess.parse_square(sq)
             if not rmap.can_reach(args.arm, chess.square_file(sq_index), chess.square_rank(sq_index)):
                 raise SettingInfeasible(f"{args.arm} cannot reach {sq}")
         sim_miss = good_pitch is not None and not good_pitch[0] <= setting.pitch_deg <= good_pitch[1]
-        shuttle = ArmShuttle(Executor(cfg, arms, rmap, pitch=pitch, **exec_kwargs), piece, world, sim_miss)
+        shuttle = ArmShuttle(Executor(cfg, arms, rmap, pitch=pitch, grip_depth=grip_depth, **exec_kwargs),
+                             piece, world, sim_miss)
         try:  # plan both directions now, so a too-steep tilt fails here and not mid-sweep
             for src, dst in ((home, away), (away, home)):
                 shuttle.executor.plan(shuttle.program(src, dst))
@@ -350,6 +356,7 @@ def _save_winner(args, config_dir: Path, winner: SettingResult | None, check: Se
     confirmed = f"{check.successes}/{check.attempts}"
     path = save_tuned_grasp(config_dir, args.piece, TunedGrasp(
         pitch_deg=winner.setting.pitch_deg, z_offset_mm=winner.setting.z_offset_mm,
+        grip_depth_mm=args.grip_depth_mm,
         confirmed=confirmed, tuned_on=f"{args.arm} {args.uci}", date=time.strftime("%Y-%m-%d"),
     ))
     print(f"saved {args.piece}: {label}, confirmed {confirmed} -> {path}")

@@ -103,26 +103,28 @@ def reach_pose(
     z_clear: float | None = None,
     max_pitch: float = 0.0,
     to_urdf: Callable[[dict[str, float]], dict[str, float]] = model_to_urdf,
+    grip_depth: float | None = None,
 ) -> GraspPose | None:
     """Smallest-tilt grasp of board-frame ``xyz`` (also clearing z_clear), or ``None`` if unreached.
 
     Sweeps pitch 0..``max_pitch`` and returns the first that solves top-to-bottom (every height)
     with all joints inside their URDF limit -- the "lean as little as possible" policy.
     ``max_pitch=0`` is a pure top-down check (the default, so existing callers are unchanged).
+    ``grip_depth`` is where the stem sits in the jaws (see :func:`tilted_tip_target`).
     """
     x, y = placement.board_to_arm(np.asarray(xyz[:2], dtype=float))
     heights = [float(xyz[2])] if z_clear is None else [float(xyz[2]), z_clear]
     pitch = 0.0
     while pitch <= max_pitch + 1e-9:
-        if all(_in_limits(kinematics, x, y, z, pitch, limits, to_urdf) for z in heights):
+        if all(_in_limits(kinematics, x, y, z, pitch, limits, to_urdf, grip_depth) for z in heights):
             return GraspPose(pitch=pitch)
         pitch += DEFAULT_PITCH_STEP
     return None
 
 
-def _in_limits(kinematics, x, y, z, pitch, limits, to_urdf) -> bool:
+def _in_limits(kinematics, x, y, z, pitch, limits, to_urdf, grip_depth=None) -> bool:
     try:
-        target = tilted_tip_target(np.array([x, y, z]), pitch, kinematics.model.tip_to_pad)
+        target = tilted_tip_target(np.array([x, y, z]), pitch, kinematics.model.tip_to_pad, grip_depth)
         joints = to_urdf(kinematics.inverse(target, pitch=pitch))
     except Unreachable:
         return False
@@ -154,6 +156,7 @@ def compute_reachability(
     pad_xyz: np.ndarray | None = None,
     limits: Mapping[str, JointLimit] | None = None,
     max_pitch: float = 0.0,
+    grip_depth: float | None = None,
 ) -> ReachabilityMap:
     """Every square center at ``z_grasp`` (and ``z_clear``) per arm, plus the pad if given.
 
@@ -171,7 +174,8 @@ def compute_reachability(
         for f in range(board_geom.BOARD_SIZE):
             for r in range(board_geom.BOARD_SIZE):
                 xyz = np.append(board_geom.square_center(f, r, square_size), z_grasp)
-                pose = reach_pose(placement, kinematics, xyz, limits, z_clear, max_pitch)
+                pose = reach_pose(placement, kinematics, xyz, limits, z_clear, max_pitch,
+                                  grip_depth=grip_depth)
                 if pose is not None:
                     squares.add((f, r))
                     arm_poses[(f, r)] = pose

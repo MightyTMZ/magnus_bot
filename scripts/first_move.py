@@ -62,6 +62,7 @@ def main(argv: list[str] | None = None) -> int:
     config = load_config(args.config_dir)
     # Rook grasp (tilt + fingertip height): tuned if tune_grasp.py --save ran, else measured. Low hover.
     tuned_pitch, z_grasp = config.grasp_for(PIECE, default_pitch=math.radians(DEFAULT_PITCH_DEG))
+    grip_depth = config.grip_depth_for(PIECE)  # None = stem at the pads
     pitch = math.radians(args.pitch) if args.pitch is not None else tuned_pitch
     source = "--pitch" if args.pitch is not None else ("tuned" if PIECE in config.grasp_tuning else "default")
     config = dataclasses.replace(
@@ -72,7 +73,7 @@ def main(argv: list[str] | None = None) -> int:
     placements = arm_placements(config.board.square_size, config.arms.edge_gap)
     rmap = compute_reachability(
         placements, kin, config.arms.z_grasp, config.board.square_size,
-        z_clear=config.arms.z_clear, max_pitch=pitch,
+        z_clear=config.arms.z_clear, max_pitch=pitch, grip_depth=grip_depth,
     )
     for sq in (src, dst):
         if not rmap.can_reach(ARM, *sq):
@@ -89,7 +90,7 @@ def main(argv: list[str] | None = None) -> int:
         arms = {a: SimArm(a) for a in config.arms.arms}
         for arm in arms.values():
             arm.connect()
-        ex = Executor(config, arms, rmap, simulate=True, pitch=pitch)
+        ex = Executor(config, arms, rmap, simulate=True, pitch=pitch, grip_depth=grip_depth)
         ex.run(ex.plan(program))  # raises on any unreachable / limit / verify fault
         print(f"SIM OK: {ARM} {label} planned + executed ({len(program[0].steps)} phases), arms at rest.")
         return 0
@@ -111,6 +112,7 @@ def main(argv: list[str] | None = None) -> int:
             limits=smap.servo_limits(kin.model.limits),
             kinematics=kin,
             pitch=pitch,
+            grip_depth=grip_depth,
         )
         print(f"LIVE: driving {ARM} {label}. Watch the arm; hand near the power.")
         ex.run(ex.plan(program))
