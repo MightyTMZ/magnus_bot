@@ -43,6 +43,7 @@ from magnus_bot.hardware.sim_arm import SimArm
 from magnus_bot.kinematics.conventions import load_servo_map
 from magnus_bot.kinematics.reach import compute_reachability
 from magnus_bot.kinematics.so101_ik import SO101Kinematics, Unreachable
+from magnus_bot.orchestration.bench import board_diagram, shut_down
 from magnus_bot.orchestration.executor import (
     ArmSteps,
     ExecutionFault,
@@ -64,7 +65,6 @@ from magnus_bot.vision.observation import (
     DEFAULT_VISION_URL,
     BoardReader,
     HttpBoardReader,
-    Occupancy,
     VisionUnavailable,
 )
 from magnus_bot.vision.sim_board import SimulatedBoard
@@ -105,14 +105,6 @@ class ArmShuttle:
         self.executor.run(self.executor.plan(self.program(src, dst)))
         if self.world is not None and not self.sim_miss:
             self.world.move(src, dst)
-
-
-def board_diagram(occupancy: Occupancy) -> str:
-    rows = [
-        f"{rank}  " + " ".join(occupancy.get(f"{f}{rank}", ".") for f in "abcdefgh")
-        for rank in range(8, 0, -1)
-    ]
-    return "\n".join([*rows, "   a b c d e f g h"])
 
 
 def check_vision(reader: HttpBoardReader, timeout: float) -> int:
@@ -332,7 +324,7 @@ def main(argv: list[str] | None = None, prompt=input) -> int:
             print("\ninterrupted", file=sys.stderr)
             code = 130
         finally:
-            _shut_down(arms, live=args.live, prompt=prompt)
+            shut_down(arms, live=args.live, prompt=prompt)
 
     print("\n" + "\n".join(summary_lines(results, scale, best=winner)))
     if args.save and code == 0:
@@ -359,24 +351,6 @@ def _save_winner(args, config_dir: Path, winner: SettingResult | None, check: Se
     ))
     print(f"saved {args.piece}: {label}, confirmed {confirmed} -> {path}")
     return 0
-
-
-def _shut_down(arms: dict, live: bool, prompt) -> None:
-    """Hold every arm, then (live) release torque only once the operator says so."""
-    for arm in arms.values():
-        try:
-            if arm.is_connected:
-                arm.hold()
-        except Exception as e:  # keep going: the other arms still need holding
-            print(f"{arm.arm_id}: hold failed: {e}", file=sys.stderr)
-    if live:
-        try:
-            prompt("Arm holding. Support it, then press Enter to release torque and disconnect: ")
-        except (EOFError, KeyboardInterrupt):
-            pass
-    for arm in arms.values():
-        if arm.is_connected:
-            arm.disconnect()
 
 
 if __name__ == "__main__":

@@ -5,7 +5,7 @@ Keep it under ~200 lines by summarizing old entries. Never delete decisions — 
 
 ## Status
 Milestone **M0 (scaffold + tests green)**: COMPLETE. No hardware has been driven by magnus_bot
-code yet. **183 tests pass, 1 skip** (placo cross-check, needs the `ik` env; a working copy with
+code yet. **209 tests pass, 1 skip** (placo cross-check, needs the `ik` env; a working copy with
 `measured: true` also fails `test_packaged_config_loads_unmeasured` — expected); ruff clean on
 `src/ tests/ scripts/` (the teammates' `RF-DETR/` scripts still have lint findings).
 **M1 Phase 0 (2026-10-24):** 0a env built (lerobot + serial-motors + magnus_bot[hardware] in
@@ -41,9 +41,34 @@ flip `measured: true`, start follower_1 from a safe near-board pose, run `--live
 **Vision online + closed tuning loop (2026-10-24):** the teammates' local RF-DETR runs on the RTX
 5050 (~25 fps) behind `RF-DETR/vision_server.py`; the arm side reads the board over localhost,
 grades every transfer and sweeps grasp settings (`scripts/tune_grasp.py`). Sim-verified end to
-end; real camera link verified from the lerobot venv. **Not yet run live** (next step 0).
+end; real camera link verified from the lerobot venv.
+**First live tuning run + reach probe (2026-10-24): the arm was landing ~3 cm SHORT on every
+square** (6/6 `not_picked` at 25/30/35 deg: tilt was never the problem). `scripts/reach_probe.py`
+(camera sees a green-painted fingertip) showed the motors reach their commands (< 0.5 deg) but the
+tip landed +29 +/- 2 mm toward follower_1's base on g3/f4/h4/f6: a GEOMETRY error.
+`edge_gap.follower_1` corrected 0.085 -> 0.114 (camera-calibrated). **Not yet re-verified live**
+(next step 0).
 
-## Last session (2026-10-24, Alex + Claude) — vision online, closed grasp-tuning loop
+## Last session (2026-10-24, Alex + Claude, part 2) — reach probe, geometry calibrated
+- **Why:** after the live tuning run missed every time, the camera could only say "not picked".
+  Measuring WHERE the arm goes split the miss into motors vs geometry.
+- **Vision server:** finds the green fingertip (HSV 33-55 / S>=55 / V>=120: measured paint is
+  yellow-green H 32-47, the board's dark squares blue-green H 83) and reports it in board squares;
+  refuses to report a board when the checkerboard is not in view (iVCam's "waiting for
+  connection" screen read as an EMPTY board); treats crop.json + corners.json as one pair and
+  reloads them when Calibrate.py rewrites them (a stale server had mixed a new crop with old
+  corners); `/` live view + `/frame.jpg`. Rank-8 pieces were dropped as off-board (the 35%-up
+  anchor lands past the far edge for tall pieces): now fall back to a point near the base.
+- **Probe** (`orchestration/probe.py` + `scripts/reach_probe.py`): holds the closed gripper 10 mm
+  over each square, reads joints back, and measures the tip with the camera at 10 mm AND 40 mm;
+  the shift between the two is parallax (~11 mm per 10 mm of height toward rank 8 on this rig),
+  extrapolated away. Verdict: MOTORS (joint gap) vs GEOMETRY (camera minus model).
+- **Result:** joints within 0.5 deg; tip +29 mm (board x, toward the base) everywhere ->
+  edge_gap. With the true geometry follower_1 reaches 18 squares top-down (was 22; f4-f6 at 10 mm
+  are out); with <= 50 deg tilt the whole board is still reachable. follower_2 NOT probed yet.
+- `orchestration/bench.py`: shared board printout + hold-then-release shutdown for bench scripts.
+
+## Earlier session (2026-10-24, Alex + Claude) — vision online, closed grasp-tuning loop
 - **Why:** live grasps kept missing (g3g4 at 20° tilt failed twice) and every miss had to be
   reported by hand. Now the camera grades each attempt and the arm re-tries / resets on its own.
 - **Feed:** iPhone via iVCam = DirectShow index 0. Frames are rotated 90° CW then cropped
@@ -138,7 +163,13 @@ end; real camera link verified from the lerobot venv. **Not yet run live** (next
   frontend/backend") — team to decide (Open questions).
 
 ## Next steps (ordered)
-0. **Run the closed tuning loop live (Alex, rig).** Rook on g3, g4 empty, follower_1 at a safe
+0. **Verify the calibration live, then grasp (Alex, rig).** (a) Vision server running; g3/h4/g5/g6
+   empty; `scripts/reach_probe.py --live --squares g3,h4,g5,g6`: expect camera offsets within a
+   few mm. If a residual remains, add it to edge_gap (reach) or note the side offset (no config
+   knob for lateral base offset / yaw yet: add one if needed). (b) Probe follower_2 the same way
+   (its 67 mm is a ruler value, likely wrong the same way). (c) Then the grasp tuning below.
+   Ruler cross-check: base yaw axis (round base motor centre) to the h-file edge should be ~114 mm.
+0c. **Grasp tuning live (Alex, rig).** Rook on g3, g4 empty, follower_1 at a safe
    near-board pose that does NOT hide g3/g4 from the camera. Terminal 1:
    `RF-DETR/.venv/Scripts/python.exe RF-DETR/vision_server.py --show`. Terminal 2 (lerobot venv):
    `scripts/tune_grasp.py --check-vision`, then
@@ -233,13 +264,16 @@ end; real camera link verified from the lerobot venv. **Not yet run live** (next
   moves. Grip is per PIECE (tuned once each); placement accuracy is per ARM (a kinematic
   calibration fitted from camera-measured errors, which generalizes to untested squares); the
   executor composes them, as the 2026-10-24 tilt decision already said.
+- 2026-10-24: Geometry is calibrated FROM THE CAMERA (reach_probe), not the ruler: the ruler
+  edge_gap was 29 mm off. Measure at two heights to remove parallax; fix the config, re-probe.
 
 ## Known issues
 - **Vision limits (2026-10-24, open).** Piece TYPES are unreliable (use colors). Occupancy cannot
   tell a standing piece from one knocked over in place (reads as present; repeated `not_picked`
   on the next try is the symptom, hence the 3-misses stop). The arm's rest pose must leave the
   tested squares visible, or reads time out / report `lost`. Only one process can hold the
-  camera: stop `Chessdetect.py` before `vision_server.py`.
+  camera: stop `Chessdetect.py` before `vision_server.py` (iVCam did allow Calibrate.py alongside).
+  The fingertip HSV range was measured under today's lighting; re-measure if paint/light change.
 - **REACH (2026-10-24, open, blocking).** Updated after step 1a (shoulder offset + URDF
   limits, top-down IK, elbow up):
   - At grasp height (2.8 cm): **48/64** squares commandable (a–c / f–h files, fewer near the corners, plus d/e on

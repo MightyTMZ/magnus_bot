@@ -52,8 +52,10 @@ def test_rig_numbers_top_down(rig):
     # Pins HANDOVER Known issues: REACH (top-down, URDF limits). Update when the geometry changes.
     config = rig[0]
     grasp = _rmap(rig)
-    assert len(set().union(*grasp.reachable.values())) == 46  # measured asymmetric rig
-    assert len(grasp.reachable["follower_1"]) == 22  # farther arm (85 mm): files f-h
+    # follower_1's edge_gap was camera-calibrated 85 -> 114 mm on 2026-10-24 (scripts/reach_probe.py),
+    # which took it from 22 squares to 18 (union 46 -> 42).
+    assert len(set().union(*grasp.reachable.values())) == 42  # measured asymmetric rig
+    assert len(grasp.reachable["follower_1"]) == 18  # farther arm (114 mm): files f-h, fewer f squares
     assert len(grasp.reachable["follower_2"]) == 24  # nearer arm (67 mm): files a-d
     assert not grasp.reachable["follower_1"] & grasp.reachable["follower_2"]
     hover = _rmap(rig, z_clear=config.arms.z_clear)
@@ -103,7 +105,7 @@ def test_pitch_opens_squares_top_down_cannot_reach(rig):
     config, placements, kin = rig
     s, zg = config.board.square_size, config.arms.z_grasp
     top_union = set().union(*compute_reachability(placements, kin, zg, s).reachable.values())
-    assert len(top_union) == 46  # matches test_rig_numbers_top_down (measured asymmetric rig)
+    assert len(top_union) == 42  # matches test_rig_numbers_top_down (measured asymmetric rig)
 
     tilt = compute_reachability(placements, kin, zg, s, max_pitch=np.radians(50))
     tilt_union = set().union(*tilt.reachable.values())

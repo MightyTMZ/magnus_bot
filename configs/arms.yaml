@@ -9,8 +9,10 @@
 # PER-ARM (MEASURED 2026-10-24): the two arms are NOT equidistant, so follower_1 reaches ~1.8 cm
 # less of the board than follower_2. A single scalar here is still accepted (applied to both arms).
 edge_gap:
-  follower_1: 0.085
-  follower_2: 0.067
+  follower_1: 0.114  # CAMERA-CALIBRATED 2026-10-24 (scripts/reach_probe.py): at the ruler value
+                     # 0.085 the tip landed +29 +/- 2 mm toward the base on g3/f4/h4/f6, i.e. the
+                     # yaw axis is that much farther out (0.085 was likely taken from the base front).
+  follower_2: 0.067  # ruler value, NOT yet probed: probably off the same way; probe before trusting.
 
 # Default trajectory speed scale (0..1). Conservative by default.
 speed_scale: 0.3
