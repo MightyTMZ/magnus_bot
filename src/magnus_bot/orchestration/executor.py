@@ -20,6 +20,7 @@ during a handoff. On any fault during motion every arm holds position (safety ru
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 import math
 import time
@@ -58,6 +59,15 @@ VERIFY_TOLERANCE = 0.05
 # tips must never be driven into the table. Checked on the commanded tip minus the arm's measured
 # sag (arms.z_correction), i.e. where the tip really goes.
 TABLE_CLEARANCE = 0.003
+# Choosing among grasps: a pose counts as reachable if no joint goes more than this past its servo's
+# physical stop (rad). Below the arrival check's tolerance, so a pose that works 1.5 deg short of a
+# stop (the rook's 60 deg on g, 2026-10-25) is kept; one 5 deg past (the queen at 60) is eased.
+STOP_SLACK = math.radians(2.5)
+# When a tuned grasp cannot reach a square (e.g. h3-h6, beside follower_1's base), try steeper
+# approaches with the same grip height on the piece, then the stem nearer the tips (10 mm).
+EASE_STEP = math.radians(5.0)
+EASE_MIN_PITCH = math.radians(15.0)
+EASE_GRIP_DEPTH = 0.010
 # Before the gripper closes on a piece or lets go of one, the arm must be at the pose it was sent to
 # (within VERIFY_TOLERANCE), waiting up to this long (s) for it to settle. 2026-10-25 live: the elbow
 # stalled short of the h4 place pose, the gripper opened on schedule, and the rook fell onto the
@@ -68,6 +78,10 @@ GRIPPER_PHASES = (Phase.GRIP, Phase.RELEASE)
 
 class JointLimitError(ValueError):
     """A planned joint target lies outside its limit (raised before any motion)."""
+
+
+class BeyondServoStop(JointLimitError):
+    """A grasp would drive a joint past its servo's physical stop: try an easier grasp."""
 
 
 class ExecutionFault(RuntimeError):
@@ -186,6 +200,7 @@ def plan_joint_program(
     grip_depth: float | None = None,
     tuned_grasps: bool = False,
     side_offset: float = 0.0,
+    stops: Mapping[str, Mapping[str, JointLimit]] | None = None,
 ) -> list[ArmTrajectory]:
     """Joint trajectories for a whole program, each starting and ending at that arm's ``rest`` pose.
 
@@ -194,8 +209,10 @@ def plan_joint_program(
     ``side_offset`` to the arm's left of each square (the jaws open to one side of the aim). With
     ``tuned_grasps``, each transfer instead tries the piece's tuned grasps (configs/grasp.yaml:
     per-square overrides for its squares first, then the piece's default) and takes the first that
-    plans at BOTH ends. Raises :class:`Unreachable` or :class:`JointLimitError` (with arm, transfer
-    and phase) if a transfer cannot be commanded. Pure: nothing is sent to any arm.
+    plans at BOTH ends; a tuned grasp that cannot reach (URDF limits, the table, or ``stops``: per
+    arm, the servos' physical stops in command angles) is eased to steeper tilts with the same grip
+    height. Raises :class:`Unreachable` or :class:`JointLimitError` (with arm, transfer and phase) if
+    a transfer cannot be commanded. Pure: nothing is sent to any arm.
     """
     placements = arm_placements(config.board.square_size, config.arms.edge_gap)
     trajectories = []
@@ -203,13 +220,17 @@ def plan_joint_program(
         home = dict(rest[arm_steps.arm_id])
         piece = piece_name(arm_steps.transfer.piece_symbol)
         choices = config.grasp_choices(piece, transfer_squares(arm_steps.transfer)) if tuned_grasps else []
-        if not choices:
+        if choices:
+            choices = [eased for c in choices for eased in _eased(c, kinematics.model.tip_to_pad)]
+        else:
             choices = [GraspChoice(pitch, None, grip_depth, "as given", side_offset)]  # type: ignore[arg-type]
+        arm_stops = (stops or {}).get(arm_steps.arm_id)
         first_error: Exception | None = None
         for choice in choices:
             try:
-                waypoints, checkpoints = _arm_waypoints(arm_steps, config, home, placements[arm_steps.arm_id],
-                                                        kinematics, limits, to_command, choice, piece)
+                waypoints, checkpoints = _arm_waypoints(
+                    arm_steps, config, home, placements[arm_steps.arm_id], kinematics, limits, to_command,
+                    choice, piece, arm_stops)
                 break
             except (Unreachable, JointLimitError) as exc:
                 first_error = first_error or exc
@@ -221,7 +242,28 @@ def plan_joint_program(
     return trajectories
 
 
-def _arm_waypoints(arm_steps, config, home, placement, kinematics, limits, to_command, choice, piece):
+def _eased(choice: GraspChoice, tip_to_pad: float) -> list[GraspChoice]:
+    """``choice``, then steeper tilts (same grip height on the piece), then the same with the stem
+    nearer the jaw tips (keeps the tips off the table when the tool is near vertical)."""
+    pitches = []
+    p = choice.pitch - EASE_STEP
+    while p >= EASE_MIN_PITCH - 1e-9:
+        pitches.append(p)
+        p -= EASE_STEP
+    out = [choice]
+    for p in pitches:
+        out.append(dataclasses.replace(choice, pitch=p,
+                                       label=f"{choice.label}, eased to {math.degrees(p):.0f} deg"))
+    if (choice.grip_depth if choice.grip_depth is not None else tip_to_pad) > EASE_GRIP_DEPTH:
+        for p in [choice.pitch, *pitches]:
+            out.append(dataclasses.replace(
+                choice, pitch=p, grip_depth=EASE_GRIP_DEPTH,
+                label=f"{choice.label}, eased to {math.degrees(p):.0f} deg, stem 10 mm from the tips"))
+    return out
+
+
+def _arm_waypoints(arm_steps, config, home, placement, kinematics, limits, to_command, choice, piece,
+                   stops=None):
     """Joint waypoints (rest first and last) for one transfer with one grasp ``choice``."""
     correction = config.arms.correction(arm_steps.arm_id)  # where the real arm lands vs the model
     at_grasp = {ph for end, loc in (("src", arm_steps.transfer.src), ("dst", arm_steps.transfer.dst))
@@ -258,6 +300,11 @@ def _arm_waypoints(arm_steps, config, home, placement, kinematics, limits, to_co
             check_limits(command, limits)
         except JointLimitError as exc:
             raise JointLimitError(f"{where}: {exc} [{choice.label}]") from exc
+        past = {n: math.degrees(max(stops[n].lo - v, v - stops[n].hi)) for n, v in command.items()
+                if stops and n in stops and not stops[n].lo - STOP_SLACK <= v <= stops[n].hi + STOP_SLACK}
+        if past:
+            detail = ", ".join(f"{n} {d:.1f} deg" for n, d in past.items())
+            raise BeyondServoStop(f"{where}: past the servo stop by {detail} [{choice.label}]")
         waypoints.append(command)
     waypoints.append(home)  # back to rest: clears the board (and the pad) for the other arm
     return waypoints, checkpoints
@@ -281,6 +328,7 @@ class Executor:
         grip_depth: float | None = None,
         tuned_grasps: bool = False,
         side_offset: float = 0.0,
+        stops: Mapping[str, Mapping[str, JointLimit]] | None = None,
     ) -> None:
         if live and simulate:
             raise ValueError("choose live or simulate, not both")
@@ -288,6 +336,7 @@ class Executor:
         self.grip_depth = grip_depth
         self.tuned_grasps = tuned_grasps  # per-transfer grasps from configs/grasp.yaml
         self.side_offset = side_offset  # explicit mode: aim this far to the arm's left (m)
+        self.stops = stops  # per arm: servo stops in command angles, to choose reachable grasps
         self.config = config
         self.arms = arms
         self.rmap = rmap
@@ -329,7 +378,7 @@ class Executor:
         rest = {arm_id: self.arms[arm_id].read_joints() for arm_id in used}
         return plan_joint_program(
             program, self.config, rest, self.kinematics, self.limits, self.to_command,
-            self.hz, self.pitch, self.grip_depth, self.tuned_grasps, self.side_offset,
+            self.hz, self.pitch, self.grip_depth, self.tuned_grasps, self.side_offset, self.stops,
         )
 
     def run(self, trajectories: list[ArmTrajectory]) -> None:

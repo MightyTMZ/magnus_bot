@@ -67,3 +67,31 @@ def config_dir(tmp_path):
         return out
 
     return make
+
+
+@pytest.fixture(autouse=True)
+def _no_machine_calibration(tmp_path_factory, monkeypatch):
+    """Keep tests off this machine's LeRobot calibration files (servo stops) unless a test brings its
+    own with ``lerobot_calibration``."""
+    monkeypatch.setenv("MAGNUS_CALIBRATION_DIR", str(tmp_path_factory.mktemp("no_calibration")))
+
+
+# follower_1's LeRobot calibration as of 2026-10-25 (elbow stops at +/-96.3 deg).
+F1_CALIBRATION = {
+    "shoulder_pan": {"id": 1, "drive_mode": 0, "homing_offset": -1992, "range_min": 747, "range_max": 3474},
+    "shoulder_lift": {"id": 2, "drive_mode": 0, "homing_offset": -1148, "range_min": 841, "range_max": 3147},
+    "elbow_flex": {"id": 3, "drive_mode": 0, "homing_offset": 488, "range_min": 875, "range_max": 3065},
+    "wrist_flex": {"id": 4, "drive_mode": 0, "homing_offset": -138, "range_min": 824, "range_max": 3117},
+    "wrist_roll": {"id": 5, "drive_mode": 0, "homing_offset": -1590, "range_min": 0, "range_max": 4095},
+    "gripper": {"id": 6, "drive_mode": 0, "homing_offset": 1543, "range_min": 1755, "range_max": 3225},
+}
+
+
+@pytest.fixture
+def lerobot_calibration(tmp_path, monkeypatch):
+    """A LeRobot calibration directory holding follower_1's calibration (servo stops)."""
+    directory = tmp_path / "calibration"
+    directory.mkdir()
+    (directory / "follower_1.json").write_text(json.dumps(F1_CALIBRATION))
+    monkeypatch.setenv("MAGNUS_CALIBRATION_DIR", str(directory))
+    return directory

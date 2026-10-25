@@ -45,7 +45,8 @@ sits at the rank-8 edge (`human_color: black`, flippable).
 - `src/magnus_bot/vision/` — stdlib client for the vision server, transfer grading
   (`verify.py`), `SimulatedBoard`; plus the old in-process Camera/homography stubs.
 - `RF-DETR/` — vision service + calibration (its own venv `RF-DETR/.venv`; torch+CUDA).
-- `scripts/` — reach_report, jog_arm, first_move, tune_grasp, reach_probe, fit_arm_geometry,
+- `scripts/` — play_moves (real moves, camera-graded), reach_report, jog_arm, first_move, tune_grasp,
+  reach_probe, fit_arm_geometry,
   calibrate_board, hardware_selftest.
 - `hardware/` — reference calibration + example self-test outputs (folded from arm_test).
 - `tests/`, `docs/`.

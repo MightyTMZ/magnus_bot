@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -115,6 +116,39 @@ class ServoMap:
 
 def load_servo_map(path: str | Path) -> ServoMap:
     return ServoMap.from_dict(json.loads(Path(path).read_text()))
+
+
+# LeRobot calibrations (`lerobot-calibrate`); MAGNUS_CALIBRATION_DIR overrides (tests use their own).
+LEROBOT_CALIBRATION_DIR = (Path.home() / ".cache" / "huggingface" / "lerobot" / "calibration" / "robots"
+                           / "so_follower")
+
+
+def servo_stops(calibration_id: str, directory: Path | None = None) -> dict[str, JointLimit] | None:
+    """Where each arm joint's servo physically stops (servo angles, rad), or None without a file.
+
+    LeRobot writes a calibration's range_min / range_max into the servo's own position limits and,
+    in degrees mode, reports ``(ticks - mid) * 360 / 4095``. 2026-10-25: follower_1's elbow stops at
+    +/-96.3 deg. Used to CHOOSE reachable grasps (planning still checks only the URDF limits).
+    """
+    base = Path(directory or os.environ.get("MAGNUS_CALIBRATION_DIR", LEROBOT_CALIBRATION_DIR))
+    try:
+        cal = json.loads((base / f"{calibration_id}.json").read_text())
+    except OSError:
+        return None
+    out = {}
+    for name in ARM_JOINTS:
+        half = math.radians((cal[name]["range_max"] - cal[name]["range_min"]) / 2 * 360 / 4095)
+        out[name] = JointLimit(-half, half)
+    return out
+
+
+def stops_in_urdf(smap: ServoMap, stops: Mapping[str, JointLimit]) -> dict[str, JointLimit]:
+    """Servo stops expressed in URDF angles (what the sim commands)."""
+    out = {}
+    for name, (sign, offset) in smap.joints.items():
+        lo, hi = sorted((sign * (stops[name].lo - offset), sign * (stops[name].hi - offset)))
+        out[name] = JointLimit(lo, hi)
+    return out
 
 
 class NudgeError(ValueError):

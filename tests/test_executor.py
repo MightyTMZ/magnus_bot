@@ -1,6 +1,7 @@
 """Executor: program building (dry-run) and joint execution (simulate, live gates)."""
 
 import dataclasses
+import math
 
 import chess
 import numpy as np
@@ -15,6 +16,7 @@ from magnus_bot.kinematics.conventions import model_to_urdf, urdf_to_model
 from magnus_bot.kinematics.model import JointLimit
 from magnus_bot.kinematics.so101_ik import SO101Kinematics, Unreachable
 from magnus_bot.orchestration.executor import (
+    VERIFY_TOLERANCE,
     ExecutionFault,
     Executor,
     JointLimitError,
@@ -306,3 +308,14 @@ def test_side_offset_aims_to_the_arms_left_of_the_square():
     # 5 mm square to the reach, to the arm's left (h4 is ~15 deg off the arm's centre line).
     assert split_mm(after - before, reach_dir) == pytest.approx((0.0, 5.0), abs=0.3)
     assert after[1] < before[1]  # i.e. toward rank 1
+
+
+def test_servo_stop_check_picks_an_easier_grasp_but_keeps_one_that_is_barely_over():
+    from magnus_bot.config import GraspChoice
+    from magnus_bot.orchestration.executor import STOP_SLACK, _eased
+
+    eased = _eased(GraspChoice(math.radians(45), 0.003, None, "pawn default"), tip_to_pad=0.023)
+    assert eased[0].label == "pawn default"  # the tuned grasp is always tried first
+    assert [round(math.degrees(c.pitch)) for c in eased[1:6]] == [40, 35, 30, 25, 20]
+    assert eased[-1].grip_depth == pytest.approx(0.010)  # finally: stem near the tips
+    assert math.degrees(STOP_SLACK) < math.degrees(VERIFY_TOLERANCE)  # never past what arrival allows

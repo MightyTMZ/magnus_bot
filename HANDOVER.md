@@ -138,6 +138,19 @@ base 0.078 + the arm falling 33 mm short (`arms.reach_correction`) + 2 mm right 
   piece's symbol, so its grasp + gripper hold apply): bishop/knight runs on g4g5 had failed as
   illegal moves.
 
+- **Saved grasps** (configs/grasp.yaml): rook 60/-9 (pads); bishop 40/0 (12/12 at 45, operator
+  chose 40); queen 45/-2 (raised 4 mm onto a steadier stem part, unconfirmed); pawn 45/-2 (5/5).
+  Holds: pawn 1.7 (very tight), bishop 4.5, queen 7.5, knight 6.5 (30% tighter), king 10, rook 4.15.
+  Lift/travel at 10 cm (6 cm let carried pieces drop). Knight + king not tuned yet.
+- **`scripts/play_moves.py`: real moves.** Plays the robots' UCI moves from --fen (Black passes
+  between them), sim pass of the whole sequence first, then live (follower_1 only; refuses
+  captures/handoffs: bins + pad uncalibrated), camera grades each move near its squares and stops
+  on anything but success. Grasps: per-square override, else the piece default, EASED when it
+  cannot reach a square (steeper in 5 deg steps to 15 deg, then stem 10 mm from the tips), judged
+  on URDF limits + the table + the servos' physical stops (`conventions.servo_stops`, from the
+  LeRobot calibration; up to 2.5 deg past a stop still counts, so the rook's 60 deg on g stays).
+  Sim: g2g4 / f2f4 / e2e4 at 45; h2h3 eased to 40, h2h4 / h3h4 / h4h5 to 30.
+
 ## Earlier session (2026-10-24, Alex + Claude, part 2) — reach probe, geometry calibrated
 - **Why:** after the live tuning run missed every time, the camera could only say "not picked".
   Measuring WHERE the arm goes split the miss into motors vs geometry.
