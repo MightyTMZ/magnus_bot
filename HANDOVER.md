@@ -92,6 +92,17 @@ flip `measured: true`, start follower_1 from a safe near-board pose, run `--live
   Gaps: color-only so promotions are ambiguous (e7e8q vs e7e8n); keeps its OWN `chess.Board`;
   Windows-only (`CAP_DSHOW`); must run from `RF-DETR/`; deps not in `pyproject.toml`; does not
   use the `vision/` / `BoardSource` interfaces; arms will occlude it mid-move.
+  - **2026-10-24 (feed online, Alex + Claude):** webcam is now an **iPhone via iVCam**
+    (DirectShow index **0**; confirmed by name with pygrabber). RF-DETR's packaged cv2 (in
+    the lerobot venv) is **headless** — no `imshow` — so a dedicated **GUI vision venv** was
+    built at `RF-DETR/.venv` (uv, py3.13, full `opencv-python` cv2 5.0.0). Use that venv for
+    `camera.py` / `Calibrate.py` / `Chessdetect.py`. Added a shared `board.prep_frame()` that
+    **rotates 90° CW then crops** every frame (phone mounted sideways; crop trims margin);
+    `Calibrate.py` drags the crop (→ `crop.json`) and clicks a8→h8→h1→a1 (→ `corners.json`),
+    and `Chessdetect.py` applies the same `prep_frame` before inference so both share one
+    coord space. Calibrated + homography-validated (corners→correct squares, center→d4).
+    STILL stubbed for the full read: `supervision`+`inference_sdk`+`python-dotenv` not yet in
+    `RF-DETR/.venv`, and no `.env`/`ROBOFLOW_API_KEY` yet.
 - **`chess_com/magnus_bot/` (Tom): Next.js 16 + Steel cloud browser on chess.com.** Polls the
   page URL every 3 s (a fresh CDP connect per poll) to detect a game/bot page; "Abandon" and
   "Go to live game" buttons; board view is a placeholder. No move read/write, no link to

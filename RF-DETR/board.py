@@ -1,11 +1,48 @@
 import cv2
 import json
+import os
 import numpy as np
 
 BOARD_SIZE = 800
 SQUARE = BOARD_SIZE // 8
 # Higher camera: sample farther up the box so the point stays on the piece's square.
 FOOT = 0.35
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+CROP_PATH = os.path.join(HERE, "crop.json")
+# The phone is mounted sideways, so every frame is rotated before anything else.
+# Set to None to disable rotation.
+ROTATE_CODE = cv2.ROTATE_90_CLOCKWISE
+
+
+def load_crop(path=CROP_PATH):
+    """Return (x, y, w, h) in ROTATED-frame coordinates, or None for no crop."""
+    if os.path.exists(path):
+        with open(path) as f:
+            c = json.load(f)
+        if c and c.get("w") and c.get("h"):
+            return c["x"], c["y"], c["w"], c["h"]
+    return None
+
+
+def save_crop(x, y, w, h, path=CROP_PATH):
+    with open(path, "w") as f:
+        json.dump({"x": int(x), "y": int(y), "w": int(w), "h": int(h)}, f)
+
+
+def prep_frame(frame):
+    """Rotate then crop a raw camera frame.
+
+    MUST be applied identically in calibration and detection so corners.json and
+    the Roboflow detections live in the same coordinate space.
+    """
+    if ROTATE_CODE is not None:
+        frame = cv2.rotate(frame, ROTATE_CODE)
+    crop = load_crop()
+    if crop:
+        x, y, w, h = crop
+        frame = frame[y:y + h, x:x + w]
+    return frame
 
 def load_homography(path="corners.json"):
     with open(path) as f:
