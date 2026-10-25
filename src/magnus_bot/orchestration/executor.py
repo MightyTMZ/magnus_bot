@@ -181,6 +181,10 @@ GRASP_HEIGHT_PHASES = {  # steps that sit at the piece's grasp height, per end o
     "src": (Phase.DESCEND_PICK, Phase.GRIP),
     "dst": (Phase.DESCEND_PLACE, Phase.RELEASE),
 }
+SQUARE_PHASES = {  # every step over each end of the transfer (a square nudge moves all of them)
+    "src": (Phase.HOVER, Phase.DESCEND_PICK, Phase.GRIP, Phase.LIFT),
+    "dst": (Phase.TRAVERSE, Phase.DESCEND_PLACE, Phase.RELEASE, Phase.RETRACT),
+}
 
 
 def piece_name(symbol: str) -> str:
@@ -276,6 +280,13 @@ def _arm_waypoints(arm_steps, config, home, placement, kinematics, limits, to_co
     # placed there at its own grasp height (the pad/bin z in handoff.yaml is only a fallback).
     at_grasp = {ph for end, loc in (("src", arm_steps.transfer.src), ("dst", arm_steps.transfer.dst))
                 if loc.kind in (SQUARE, PAD, BIN) for ph in GRASP_HEIGHT_PHASES[end]}
+    nudges = config.arms.square_nudge.get(arm_steps.arm_id, {})
+    phase_nudge = {}  # phase -> (reach, side) for the square that step sits over
+    for end, loc in (("src", arm_steps.transfer.src), ("dst", arm_steps.transfer.dst)):
+        if loc.kind == SQUARE and loc.square is not None:
+            nudge = nudges.get(chess.square_name(chess.square(*loc.square)))
+            if nudge:
+                phase_nudge.update({ph: nudge for ph in SQUARE_PHASES[end]})
     gripper = home["gripper"]
     waypoints = [home]
     checkpoints = []  # (waypoint index, phase) the arm must reach before the gripper acts
@@ -310,7 +321,8 @@ def _arm_waypoints(arm_steps, config, home, placement, kinematics, limits, to_co
         x, y = placement.board_to_arm(step.xyz[:2])
         z = choice.z if choice.z is not None and step.phase in at_grasp else step.xyz[2]
         side = choice.side + config.arms.grasp_side_offset.get(arm_steps.arm_id, 0.0)  # jaws open sideways
-        aim = ArmCorrection(side=side).apply(np.array([x, y, z]))
+        reach_nudge, side_nudge = phase_nudge.get(step.phase, (0.0, 0.0))
+        aim = ArmCorrection(reach=reach_nudge, side=side + side_nudge).apply(np.array([x, y, z]))
         target = correction.apply(tilted_tip_target(aim, choice.pitch, kinematics.model.tip_to_pad,
                                                     choice.grip_depth))
         tip_z = target[2] - correction.z  # where the real (sagging) tip goes

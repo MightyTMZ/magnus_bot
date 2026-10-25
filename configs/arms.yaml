@@ -38,6 +38,12 @@ z_correction:       # the arm sits this much LOWER than the model
 # top of each tuned grasp's own side_offset_mm. The jaws open to one side of the aim point, so dead
 # centre lands a jaw on the piece's head. 2026-10-25: f-file and g4g5 grasps still came down on the
 # heads; operator: +2-3 mm more -> 3 mm.
+# Per arm, per square: [reach, side] mm added to the aim at that square only (pick or place, any
+# piece); + = further from the arm / to its left. For single squares where an arm lands a bit off.
+square_nudge_mm:
+  follower_1:
+    f7: [4, -4]  # 2026-10-25: the queen landed short and left of f7 (Qxf7); operator: front-right
+
 grasp_side_offset:
   follower_1: 0.003
   follower_2: -0.003  # its wrist roll sits ~180 deg off, so the jaws open to the mirrored side:

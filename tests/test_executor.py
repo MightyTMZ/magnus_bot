@@ -335,3 +335,18 @@ def test_after_the_drop_off_the_arm_goes_up_then_back_before_rest():
     near_arm = [t for t in tips if abs(np.hypot(t[0], t[1]) - VIA_REACH) < 0.003]
     assert near_arm, "never passes the point near the arm's edge"
     assert near_arm[0][2] == pytest.approx(config.arms.z_clear, abs=0.003)  # still high when it gets there
+
+
+def test_a_square_nudge_moves_only_that_squares_end_of_the_move():
+    config = _low_clear()
+    tips = {}
+    for nudge in ({}, {"follower_1": {"h5": (0.010, 0.0)}}):
+        cfg = dataclasses.replace(config, arms=dataclasses.replace(config.arms, square_nudge=nudge))
+        arms, executor = _sim(cfg)
+        traj = executor.plan(build_move_program(ROOK_H4, H4H5, _full_reach_map(cfg), cfg))[0]
+        at = dict((phase, i) for i, phase in traj.checkpoints)
+        fk = SO101Kinematics().forward
+        tips[bool(nudge)] = {ph: fk(urdf_to_model(traj.samples[i]))[:2] for ph, i in at.items()}
+    further = np.hypot(*tips[True]["release"]) - np.hypot(*tips[False]["release"])
+    assert further == pytest.approx(0.010, abs=5e-4)  # h5 (the place) 10 mm further out
+    assert tips[True]["grip"] == pytest.approx(tips[False]["grip"], abs=1e-6)  # h4 (the pick) untouched

@@ -109,6 +109,9 @@ class ArmsConfig:
     # Per arm: every GRASP aims this far to the arm's left of the square (m), on top of the grasp's
     # own side_offset_mm: the jaws open to one side of the aim point (operator, 2026-10-25).
     grasp_side_offset: dict[str, float] = field(default_factory=dict)
+    # Per arm, per square: (reach, side) m added to the aim at THAT square only (pick or place, any
+    # piece), + = further / to the arm's left. For squares where the arm lands a little off.
+    square_nudge: dict[str, dict[str, tuple[float, float]]] = field(default_factory=dict)
 
     def correction(self, arm_id: str) -> ArmCorrection:
         return ArmCorrection(reach=self.reach_correction.get(arm_id, 0.0),
@@ -272,6 +275,9 @@ def load_config(config_dir: str | Path | None = None) -> Config:
         side_correction=_float_map(arms_raw, "side_correction"),
         lateral_correction=_float_map(arms_raw, "lateral_correction"),
         grasp_side_offset=_float_map(arms_raw, "grasp_side_offset"),
+        square_nudge={str(arm): {str(sq): (float(v[0]) / 1000.0, float(v[1]) / 1000.0)
+                                 for sq, v in (squares or {}).items()}
+                      for arm, squares in (arms_raw.get("square_nudge_mm") or {}).items()},
     )
 
     handoff = HandoffConfig(
