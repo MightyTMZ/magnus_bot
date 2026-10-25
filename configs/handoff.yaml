@@ -1,32 +1,36 @@
-# Off-board poses: the handoff pad, per-arm capture bins, and the promotion stash.
-# Board frame B (meters); yaw in radians (null = top-down default grasp). PLACEHOLDER values.
+# Handoff pad, per-arm capture bins, and the promotion stash. Board frame B (meters); yaw in radians
+# (null = top-down default grasp). Pieces are picked and placed at the pad and the bins at their own
+# grasp height (the executor substitutes it), so z here is only a fallback for untuned pieces.
 #
-# The pad is reachable by BOTH arms: when neither arm can reach both source and destination
-# of a move, arm A places the piece on the pad and arm B picks it up. scripts/reach_report.py
-# evaluates candidate pad positions and recommends one; fill that in here once measured.
+# The pad is reachable by BOTH arms: when neither arm can reach both source and destination of a
+# move, arm A places the piece on the pad and arm B picks it up from there.
 
+# 2026-10-25: the pad is a board SQUARE both arms reach and that stays empty in the demo game
+# (Scholar's mate): e3. Both arms reach d3-d6, e1-e8 and f3-f6. Move it if a game needs e3.
 pad:
-  x: 0.200   # PLACEHOLDER
-  y: 0.200   # PLACEHOLDER
-  z: 0.020   # PLACEHOLDER
+  x: 0.252   # e3 centre: 4.5 squares
+  y: 0.140   # 2.5 squares
+  z: 0.020
   yaw: null
 
-# One bin per arm for pieces that arm captures (victim goes to the capturing side's bin).
+# One bin per arm for pieces that arm captures: a spot on the table just off the board, beside
+# each arm's rank-8 corner (2026-10-25 sim: follower_1 plans h5xf7 with the f7 pawn to its bin;
+# 14 of 15 candidate spots there planned).
 bins:
   follower_1:
-    x: 0.450   # PLACEHOLDER
-    y: -0.080  # PLACEHOLDER
-    z: 0.020   # PLACEHOLDER
+    x: 0.470   # 22 mm beyond the h-file edge
+    y: 0.420   # level with rank 8
+    z: 0.020
     yaw: null
   follower_2:
-    x: -0.050  # PLACEHOLDER
-    y: -0.080  # PLACEHOLDER
-    z: 0.020   # PLACEHOLDER
+    x: -0.022  # 22 mm beyond the a-file edge (mirror of follower_1's)
+    y: 0.420
+    z: 0.020
     yaw: null
 
-# Where spare queens wait to be placed on a promotion.
+# Where spare queens wait to be placed on a promotion. PLACEHOLDER (not used in the demo).
 promotion_stash:
-  x: 0.200   # PLACEHOLDER
-  y: -0.080  # PLACEHOLDER
-  z: 0.020   # PLACEHOLDER
+  x: 0.200
+  y: -0.080
+  z: 0.020
   yaw: null

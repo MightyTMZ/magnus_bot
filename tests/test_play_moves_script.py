@@ -1,6 +1,7 @@
 """scripts/play_moves.py: real moves with the tuned grasps (sim pass, easing, live gates)."""
 
 import importlib.util
+import sys
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,7 @@ SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "play_moves.py"
 def play():
     spec = importlib.util.spec_from_file_location("play_moves", SCRIPT)
     module = importlib.util.module_from_spec(spec)
+    sys.modules["play_moves"] = module  # dataclasses look their module up while being defined
     spec.loader.exec_module(module)
     return module
 
@@ -47,10 +49,25 @@ def test_illegal_moves_are_refused_before_anything(play, tuned):
         play.main(["--moves", "g2g5", "--config-dir", str(tuned)])
 
 
-def test_live_refuses_moves_off_the_board(play, config_dir, capsys):
-    cfg = config_dir(measured=True)
+def test_a_whole_game_plays_the_robot_side_and_lets_the_human_play_theirs(play, config_dir, capsys):
+    # Scholar's mate: two handoffs through the pad (e3) and a capture into follower_1's bin.
+    cfg = config_dir(measured=False)
     save_tuned_grasp(cfg, "pawn", TunedGrasp(pitch_deg=45.0, z_offset_mm=-2.0))
-    fen = "rnbqkbnr/ppppppp1/8/8/8/7p/PPPPPPPP/RNBQKBNR w KQkq - 0 1"  # g2xh3 captures
-    assert play.main(["--live", "--moves", "g2h3", "--fen", fen, "--config-dir", str(cfg)],
-                     prompt=lambda m: "no") == 1
-    assert "leaves the board" in capsys.readouterr().err
+    save_tuned_grasp(cfg, "bishop", TunedGrasp(pitch_deg=40.0, z_offset_mm=0.0))
+    save_tuned_grasp(cfg, "queen", TunedGrasp(pitch_deg=45.0, z_offset_mm=-2.0))
+    game = "e2e4,e7e5,f1c4,b8c6,d1h5,g8f6,h5f7"
+    assert play.main(["--moves", game, "--config-dir", str(cfg)]) == 0
+    out = capsys.readouterr().out
+    assert "human  e7e5 (e5)" in out and "human  g8f6 (Nf6)" in out
+    assert "SIM OK f1c4 (Bc4): follower_1 move:to-pad" in out and "follower_2 move:from-pad c4" in out
+    assert "SIM OK h5f7 (Qxf7#): follower_1 capture-victim f7" in out
+    assert "all 4 robot move(s)" in out
+
+
+def test_live_refuses_a_move_that_needs_an_arm_not_allowed(play, config_dir, capsys):
+    cfg = config_dir(measured=True)
+    save_tuned_grasp(cfg, "bishop", TunedGrasp(pitch_deg=40.0, z_offset_mm=0.0))
+    save_tuned_grasp(cfg, "pawn", TunedGrasp(pitch_deg=45.0, z_offset_mm=-2.0))
+    argv = ["--live", "--moves", "e2e4,f1c4", "--config-dir", str(cfg)]  # Bc4 is a handoff
+    assert play.main(argv, prompt=lambda m: "no") == 1
+    assert "needs follower_1, follower_2; --arms allows only follower_1" in capsys.readouterr().err

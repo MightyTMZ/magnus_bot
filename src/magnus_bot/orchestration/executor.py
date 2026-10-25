@@ -267,8 +267,10 @@ def _arm_waypoints(arm_steps, config, home, placement, kinematics, limits, to_co
                    stops=None):
     """Joint waypoints (rest first and last) for one transfer with one grasp ``choice``."""
     correction = config.arms.correction(arm_steps.arm_id)  # where the real arm lands vs the model
+    # Squares, the handoff pad and the capture bins all sit on the table: the piece is picked and
+    # placed there at its own grasp height (the pad/bin z in handoff.yaml is only a fallback).
     at_grasp = {ph for end, loc in (("src", arm_steps.transfer.src), ("dst", arm_steps.transfer.dst))
-                if loc.kind == SQUARE for ph in GRASP_HEIGHT_PHASES[end]}
+                if loc.kind in (SQUARE, PAD, BIN) for ph in GRASP_HEIGHT_PHASES[end]}
     gripper = home["gripper"]
     waypoints = [home]
     checkpoints = []  # (waypoint index, phase) the arm must reach before the gripper acts

@@ -172,6 +172,17 @@ base 0.078 + the arm falling 33 mm short (`arms.reach_correction`) + 2 mm right 
   follower_1 refit with lateral would only go 7.0 -> 5.4 mm: left as is (it works).
   Sim: rook 60/-9 plans on c4c5 but not b4b5 (elbow); b2b3, c2c4, Nc3 plan in play_moves.
 
+- **follower_2 grasp side offset -3 mm** (mirrored jaws: wrist roll ~180 deg off; rook c4c5 4/4).
+  Shared by both arms: per-piece grasps (grasp.yaml), holds (board.yaml), opening, hover, easing.
+- **Handoff + capture, demo-grade (2026-10-25):** the pad is a board SQUARE both arms reach and
+  that stays empty: e3 (handoff.yaml; both arms reach d3-d6, e1-e8, f3-f6). Bins: on the table
+  ~22 mm off the board beside each arm's rank-8 corner (follower_1 (0.470, 0.420)). The executor
+  picks/places at the pad and bins at the piece's own grasp height. play_moves.py takes a whole
+  game: robot moves are played (each handoff leg by its own arm's executor), human moves are
+  prompted and checked with the camera; the pad square is graded empty after a handoff.
+  Sim: Scholar's mate e4 / Bc4 (f1 -> e3 -> f2 -> c4) / Qh5 (f2 d1 -> e3 -> f1 h5) / Qxf7#
+  (f7 pawn to follower_1's bin first) all plan. Promotions are refused live (no stash).
+
 ## Earlier session (2026-10-24, Alex + Claude, part 2) — reach probe, geometry calibrated
 - **Why:** after the live tuning run missed every time, the camera could only say "not picked".
   Measuring WHERE the arm goes split the miss into motors vs geometry.
