@@ -36,6 +36,16 @@ queen:
   grip_depth_mm: null
   pitch_deg: 45.0
   side_offset_mm: 0.0
+  squares:
+    h5:
+      confirmed: 'operator 2026-10-25: follower_1 e3->h5 (Qh5 second leg) hit the
+        queen; aim 5 mm to the arm left'
+      date: '2026-10-25'
+      grip_depth_mm: null
+      pitch_deg: 45.0
+      side_offset_mm: 5.0
+      tuned_on: follower_1 e3h5 2026-10-25
+      z_offset_mm: -2.0
   tuned_on: follower_1 g4g5 2026-10-25
   z_offset_mm: -2.0
 rook:
