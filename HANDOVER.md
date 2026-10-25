@@ -183,6 +183,12 @@ base 0.078 + the arm falling 33 mm short (`arms.reach_correction`) + 2 mm right 
   Sim: Scholar's mate e4 / Bc4 (f1 -> e3 -> f2 -> c4) / Qh5 (f2 d1 -> e3 -> f1 h5) / Qxf7#
   (f7 pawn to follower_1's bin first) all plan. Promotions are refused live (no stash).
 
+- **Nf3 WORKS live (2026-10-25)** with knight 55 deg / z 0 / hold 2.0% (grasp.yaml + board.yaml)
+  and the new up-then-back return (executor via point 12 cm out at travel height, leaving and
+  returning to rest): g2 and the f1 bishop no longer get knocked. Tip colour range retuned
+  (H 50-75, S >= 110, V >= 100) via the new /raw.jpg; it now tracks the darker paint, not the very
+  tip (no more tip calibration planned, so left).
+
 ## Earlier session (2026-10-24, Alex + Claude, part 2) — reach probe, geometry calibrated
 - **Why:** after the live tuning run missed every time, the camera could only say "not picked".
   Measuring WHERE the arm goes split the miss into motors vs geometry.

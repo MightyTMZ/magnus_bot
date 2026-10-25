@@ -49,6 +49,7 @@ from magnus_bot.orchestration.executor import (
     ExecutionFault,
     Executor,
     JointLimitError,
+    _arm_steps,
     build_move_program,
 )
 from magnus_bot.orchestration.tuning import (
@@ -61,6 +62,7 @@ from magnus_bot.orchestration.tuning import (
     run_sweep,
     summary_lines,
 )
+from magnus_bot.planning.move_decomposer import Location, Transfer
 from magnus_bot.vision.observation import (
     DEFAULT_VISION_URL,
     BoardReader,
@@ -104,14 +106,12 @@ class ArmShuttle:
         board.set_piece_at(move.from_square, self.piece)
         if move in board.legal_moves:
             return build_move_program(board, move, self.executor.rmap, self.executor.config)
-        # Tuning shuttles between ANY two squares (g4g5 is no bishop, knight or backward-pawn move):
-        # plan it as a queen's move, then hand the transfer back to the real piece, whose grasp and
-        # gripper hold the executor uses.
-        board.set_piece_at(move.from_square, chess.Piece(chess.QUEEN, self.piece.color))
-        program = build_move_program(board, move, self.executor.rmap, self.executor.config)
-        symbol = self.piece.symbol()
-        return [dataclasses.replace(s, transfer=dataclasses.replace(s.transfer, piece_symbol=symbol))
-                for s in program]
+        # Tuning shuttles between ANY two squares (g4g5 is no bishop, knight or backward-pawn move;
+        # e3c4 no queen move either): build the physical transfer directly, for the one arm in the map.
+        arm_id = next(iter(self.executor.rmap.reachable))
+        transfer = Transfer(Location.of_square(move.from_square), Location.of_square(move.to_square),
+                            self.piece.symbol(), "move")
+        return [_arm_steps(arm_id, transfer, self.executor.config)]
 
     def transfer(self, src: str, dst: str) -> None:
         self.executor.run(self.executor.plan(self.program(src, dst)))
