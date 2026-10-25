@@ -6,9 +6,9 @@ from collections import deque
 
 import chess
 import cv2
+import numpy as np
 import supervision as sv
-from dotenv import load_dotenv
-from inference_sdk import InferenceHTTPClient
+from rfdetr import RFDETRSmall
 
 from board import build_board, draw_grid, draw_points, load_homography
 from moves import find_move, is_rook_sacrifice
@@ -24,17 +24,48 @@ notice = None
 seen_illegal = None
 quote = None
 
-load_dotenv()
+HERE = os.path.dirname(os.path.abspath(__file__))
+WEIGHTS = os.path.join(HERE, "model", "weights_2.0.pt")
 
-MODEL_ID = "chess-full-kntuv/1"
+# Class ids from the Roboflow COCO export of chess-full-kntuv/1.
+# Id 0 is Roboflow's superclass; "bishop" is a stray label with one annotation.
+CLASS_NAMES = [
+    "pieces",
+    "bishop",
+    "black-bishop",
+    "black-king",
+    "black-knight",
+    "black-pawn",
+    "black-queen",
+    "black-rook",
+    "white-bishop",
+    "white-king",
+    "white-knight",
+    "white-pawn",
+    "white-queen",
+    "white-rook",
+]
 
 CONFIDENCE = 0.35
 SEND_EVERY = 0.5
 
-client = InferenceHTTPClient(
-    api_url="https://serverless.roboflow.com",
-    api_key=os.environ["ROBOFLOW_API_KEY"],
-)
+print(f"Loading RF-DETR Small weights from {WEIGHTS}")
+model = RFDETRSmall(pretrain_weights=WEIGHTS)
+try:
+    model.optimize_for_inference()
+except Exception as e:  # optional speed-up; plain inference still works
+    print(f"optimize_for_inference skipped: {e}")
+
+
+def detect(frame):
+    """Run the local model on a BGR OpenCV frame."""
+    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    dets = model.predict(rgb, threshold=CONFIDENCE)
+    dets.data["class_name"] = np.array(
+        [CLASS_NAMES[i] if 0 <= i < len(CLASS_NAMES) else str(i) for i in dets.class_id]
+    )
+    return dets
+
 
 box_annotator = sv.BoxAnnotator()
 
@@ -135,7 +166,11 @@ def draw_moves(frame, moves, notice=None, quote=None):
     return frame
 
 
+f = 0
+
 while True:
+    f += 1
+    print(f"Frame {f}")
     ref, frame = cap.read()
 
     if not ref:
@@ -152,9 +187,7 @@ while True:
 
     now = time.time()
     if now - last_sent > SEND_EVERY:
-        result = client.infer(frame, model_id=MODEL_ID)
-        detections = sv.Detections.from_inference(result)
-        detections = detections[detections.confidence >= CONFIDENCE]
+        detections = detect(frame)
         last_sent = now
         board = build_board(detections, H)
         history.append(board)
