@@ -73,14 +73,19 @@ def _sim(config, **kwargs):
     return arms, Executor(config, arms, _full_reach_map(config), simulate=True, **kwargs)
 
 
-def test_simulate_moves_only_the_assigned_arm_and_returns_to_rest():
+def test_simulate_moves_only_the_assigned_arm_and_parks_it_high():
+    from magnus_bot.orchestration.executor import PARK_REACH
+
     config = _low_clear()
     arms, executor = _sim(config)
-    start = arms["follower_1"].read_joints()
     executor.execute_move(ROOK_H4, H4H5)
     assert arms["follower_1"].command_log
     assert not arms["follower_2"].command_log  # one arm at a time; the other is untouched
-    assert arms["follower_1"].read_joints() == pytest.approx(start)
+    # It ends parked high above its own board edge, not back down where it started (2026-10-25).
+    tip = config.arms.correction("follower_1").undo(
+        SO101Kinematics().forward(urdf_to_model(arms["follower_1"].read_joints())))
+    assert np.hypot(tip[0], tip[1]) == pytest.approx(PARK_REACH, abs=1e-3)
+    assert tip[2] >= 0.14
 
 
 def test_simulated_grip_happens_at_the_source_square():
@@ -324,20 +329,16 @@ def test_servo_stop_check_picks_an_easier_grasp_but_keeps_one_that_is_barely_ove
     assert math.degrees(STOP_SLACK) < math.degrees(VERIFY_TOLERANCE)  # never past what arrival allows
 
 
-def test_after_the_drop_off_the_arm_goes_up_then_back_before_rest():
-    # 2026-10-25: a straight joint-space swing from the square back to rest dipped across the board.
-    from magnus_bot.orchestration.executor import VIA_REACH
-
+def test_after_the_drop_off_the_arm_never_comes_back_down_low():
+    # 2026-10-25: the swing back down to a low rest pose swept the edge pieces. After the release the
+    # arm goes up and then only higher, to its park.
     config = _low_clear()
     arms, executor = _sim(config)
-    program = build_move_program(ROOK_H4, H4H5, _full_reach_map(config), config)
-    traj = executor.plan(program)[0]
-    release_at = dict((phase, i) for i, phase in traj.checkpoints)["release"]
+    traj = executor.plan(build_move_program(ROOK_H4, H4H5, _full_reach_map(config), config))[0]
+    retract_at = dict((phase, i) for i, phase in traj.checkpoints)["retract"]
     kin, fix = SO101Kinematics(), config.arms.correction("follower_1")
-    tips = [fix.undo(kin.forward(urdf_to_model(s))) for s in traj.samples[release_at:]]
-    near_arm = [t for t in tips if abs(np.hypot(t[0], t[1]) - VIA_REACH) < 0.003]
-    assert near_arm, "never passes the point near the arm's edge"
-    assert near_arm[0][2] == pytest.approx(config.arms.z_clear, abs=0.003)  # still high when it gets there
+    heights = [fix.undo(kin.forward(urdf_to_model(s)))[2] for s in traj.samples[retract_at:]]
+    assert min(heights) >= config.arms.z_clear - 0.003
 
 
 def test_a_square_nudge_moves_only_that_squares_end_of_the_move():

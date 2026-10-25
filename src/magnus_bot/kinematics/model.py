@@ -38,7 +38,7 @@ MAX_JOINT_VELOCITY: dict[str, float] = {
     "elbow_flex": 1.5,
     "wrist_flex": 2.0,
     "wrist_roll": 2.0,
-    "gripper": 100.0,
+    "gripper": 300.0,  # %/s; x speed_scale 0.3 -> ~0.5 s to close (100 took ~1.5 s, operator: faster)
 }
 
 

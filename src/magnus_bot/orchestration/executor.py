@@ -74,18 +74,25 @@ EASE_GRIP_DEPTH = 0.010
 # swing from the square to rest dipped across the board and knocked pieces over (2026-10-25).
 VIA_REACH = 0.12
 VIA_PITCHES = (math.radians(45.0), math.radians(30.0), math.radians(15.0), 0.0)
+# After a move the arm PARKS high above the gap between its base and the board, instead of going
+# back down to the (often low) pose it started from: that last swing down swept the edge pieces
+# (2026-10-25). The next move starts from there. Highest height that fits the arm's limits wins.
+PARK_REACH = 0.10  # m out from the base (~2 cm over the board edge on this rig)
+PARK_HEIGHTS = (0.20, 0.18, 0.16, 0.14)
+PARK_PITCHES = tuple(math.radians(d) for d in range(0, 91, 5))
 # Before the gripper closes on a piece or lets go of one, the arm must be at the pose it was sent to
 # (within VERIFY_TOLERANCE), waiting up to this long (s) for it to settle. 2026-10-25 live: the elbow
 # stalled short of the h4 place pose, the gripper opened on schedule, and the rook fell onto the
 # g-file. Now the arm stops and holds instead.
 ARRIVE_TIMEOUT = 2.0
+UP_TIMEOUT = 0.5  # s: at the top of a lift / retract, wait at most this long for the arm to read back
 GRIPPER_PHASES = (Phase.GRIP, Phase.RELEASE)
 # 2026-10-25: pieces were dragged along the board right after a pick and after a drop-off: the real
 # shoulder lags the plan, so the sideways move began while the arm was still low. Now the arm must
 # be UP (lift / retract read back) before moving sideways (moving on after ARRIVE_TIMEOUT rather
 # than faulting), and it pauses after the gripper closes / opens so the piece is held / let go.
 UP_PHASES = (Phase.LIFT, Phase.RETRACT)
-GRIPPER_DWELL = 0.3  # s
+GRIPPER_DWELL = 0.1  # s (0.3 looked stalled, operator 2026-10-25)
 DWELL = "dwell"
 
 
@@ -302,6 +309,28 @@ def _arm_waypoints(arm_steps, config, home, placement, kinematics, limits, to_co
     waypoints = [home]
     checkpoints = []  # (waypoint index, phase) the arm must reach before the gripper acts
 
+    def reachable(point: np.ndarray, pitches, grip: float) -> dict[str, float] | None:
+        """Command for the tip at ``point`` (arm frame, corrected) at the first pitch that fits."""
+        for p in pitches:
+            try:
+                cmd = (to_command or dict)(kinematics.inverse(point, pitch=p))
+                cmd["gripper"] = grip
+                check_limits(cmd, limits)
+            except (Unreachable, JointLimitError):
+                continue
+            if not stops or all(stops[n].lo - STOP_SLACK <= v <= stops[n].hi + STOP_SLACK
+                                for n, v in cmd.items() if n in stops):
+                return cmd
+        return None
+
+    def park(grip: float) -> dict[str, float] | None:
+        """High above the arm's own board edge, on its centre line; None if nothing fits."""
+        for z in PARK_HEIGHTS:
+            cmd = reachable(correction.apply(np.array([PARK_REACH, 0.0, z])), PARK_PITCHES, grip)
+            if cmd is not None:
+                return cmd
+        return None
+
     def via(xy_board: np.ndarray, grip: float) -> dict[str, float] | None:
         """Up at travel height near the arm's own board edge, on the line to ``xy_board``; None if no
         tilt reaches it (the move then goes without it)."""
@@ -364,6 +393,10 @@ def _arm_waypoints(arm_steps, config, home, placement, kinematics, limits, to_co
         travel.append(step.phase in TRAVEL_PHASES)
         if step.phase in UP_PHASES:  # up first: no sideways move before the arm is really up
             checkpoints.append((len(waypoints) - 1, step.phase.value))
+    if (high := park(gripper)) is not None:
+        waypoints.append(high)  # already up: back and further up to park, clear of the board
+        travel.append(True)
+        return waypoints, checkpoints, travel
     if (end := via(arm_steps.steps[-1].xyz[:2], gripper)) is not None:
         waypoints.append(end)  # after the place: already up; now back toward the arm, still high
         travel.append(True)
@@ -472,7 +505,7 @@ class Executor:
     def _arrive(self, arm: Arm, target: dict[str, float], phase: str, strict: bool = True) -> None:
         """Wait (live: up to ARRIVE_TIMEOUT) until ``arm`` reads back ``target``; else fault, or (not
         ``strict``: the lift / retract) carry on, since it is as high as it will get."""
-        give_up = time.monotonic() + (ARRIVE_TIMEOUT if self.live else 0.0)
+        give_up = time.monotonic() + ((ARRIVE_TIMEOUT if strict else UP_TIMEOUT) if self.live else 0.0)
         while True:
             actual = arm.read_joints()
             off = {n: round(math.degrees(actual[n] - v), 1) for n, v in target.items()
