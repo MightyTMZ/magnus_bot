@@ -55,6 +55,10 @@ speed_scale: 0.3
 # faster; the moves near the pieces (descend, grip, release, lift) stay at speed_scale. 2026-10-25:
 # operator asked +25%. Peak joint speed then ~32 deg/s, well under the 120 deg/s per-command clamp.
 travel_speedup: 1.25
+# The rise straight up after a pick and after a place runs this much faster (peak ~52 deg/s at 2.0):
+# 2026-10-25 at e3 (follower_1's far reach) the elbow lagged on the slow rise and the arm pulled back
+# while still down, knocking over the bishop it had just placed.
+rise_speedup: 2.0
 
 # Traverse height for the hover/traverse phases. MUST exceed the tallest piece + margin, AND
 # account for the piece hanging below the grasp point. Set 2026-10-24: king 9.9cm + ~1cm

@@ -262,9 +262,9 @@ def plan_joint_program(
                 first_error = first_error or exc
         else:
             raise first_error  # type: ignore[misc]
-        fast = config.arms.travel_speedup
+        speedup = {"travel": config.arms.travel_speedup, "rise": config.arms.rise_speedup}
         samples, at = plan_joint_trajectory_indexed(waypoints, config.arms.speed_scale, hz,
-                                                    segment_scales=[fast if t else 1.0 for t in travel])
+                                                    segment_scales=[speedup.get(k, 1.0) for k in travel])
         trajectories.append(ArmTrajectory(arm_steps.arm_id, arm_steps.transfer, samples,
                                           tuple((at[i], phase) for i, phase in checkpoints), choice.label))
     return trajectories
@@ -348,10 +348,10 @@ def _arm_waypoints(arm_steps, config, home, placement, kinematics, limits, to_co
                 return cmd
         return None
 
-    travel = []  # per segment (the one arriving at each waypoint after rest): a long travel move?
+    travel = []  # per segment (the one arriving at each waypoint after rest): "travel", "rise" or "near"
     if (start := via(arm_steps.steps[0].xyz[:2], gripper)) is not None:
         waypoints.append(start)  # out of rest: up and over before reaching across the board
-        travel.append(True)
+        travel.append("travel")
     for step in arm_steps.steps:
         if step.phase in GRIPPER_PHASES:  # the arm must be there before the gripper acts
             checkpoints.append((len(waypoints) - 1, step.phase.value))
@@ -390,18 +390,19 @@ def _arm_waypoints(arm_steps, config, home, placement, kinematics, limits, to_co
             detail = ", ".join(f"{n} {d:.1f} deg" for n, d in past.items())
             raise BeyondServoStop(f"{where}: past the servo stop by {detail} [{choice.label}]")
         waypoints.append(command)
-        travel.append(step.phase in TRAVEL_PHASES)
+        travel.append("travel" if step.phase in TRAVEL_PHASES else "rise" if step.phase in UP_PHASES
+                      else "near")
         if step.phase in UP_PHASES:  # up first: no sideways move before the arm is really up
             checkpoints.append((len(waypoints) - 1, step.phase.value))
     if (high := park(gripper)) is not None:
         waypoints.append(high)  # already up: back and further up to park, clear of the board
-        travel.append(True)
+        travel.append("travel")
         return waypoints, checkpoints, travel
     if (end := via(arm_steps.steps[-1].xyz[:2], gripper)) is not None:
         waypoints.append(end)  # after the place: already up; now back toward the arm, still high
-        travel.append(True)
+        travel.append("travel")
     waypoints.append(home)  # back to rest: clears the board (and the pad) for the other arm
-    travel.append(True)
+    travel.append("travel")
     return waypoints, checkpoints, travel
 
 

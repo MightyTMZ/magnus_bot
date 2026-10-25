@@ -92,7 +92,8 @@ def test_simulated_grip_happens_at_the_source_square():
     config = _low_clear()
     arms, executor = _sim(config)
     executor.execute_move(ROOK_H4, H4H5)
-    grip = next(c for c in arms["follower_1"].command_log if c["gripper"] == config.arms.gripper_closed)
+    closed = config.arms.gripper_closed
+    grip = next(c for c in arms["follower_1"].command_log if abs(c["gripper"] - closed) < 1e-6)
     # FK of the first fully-closed command, mapped back to the board, is h4 at grasp height.
     tip = SO101Kinematics().forward(urdf_to_model(grip))  # commands are URDF-zero angles
     placement = arm_placements(config.board.square_size, config.arms.edge_gap)["follower_1"]

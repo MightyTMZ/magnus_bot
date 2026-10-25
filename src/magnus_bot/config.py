@@ -101,6 +101,9 @@ class ArmsConfig:
     # Long travel moves (to and from rest, square to square at travel height) run this much faster
     # than speed_scale; descents, grips, releases and lifts near the pieces stay at speed_scale.
     travel_speedup: float = 1.0
+    # The rise straight up after a pick (lift) and after a place (retract) runs this much faster, so
+    # the elbow is driven up at once instead of lagging at full reach while the arm moves on.
+    rise_speedup: float = 1.0
     # Per arm, added to every commanded fingertip height: the arm sits this much LOWER than the
     # model says (measured by ruler with reach_probe.py --ask-height). Missing = 0.
     z_correction: dict[str, float] = field(default_factory=dict)
@@ -262,6 +265,7 @@ def load_config(config_dir: str | Path | None = None) -> Config:
         edge_gap=_edge_gap(arms_raw, arms_raw["arms"]),
         speed_scale=_float(arms_raw, "speed_scale"),
         travel_speedup=float(arms_raw.get("travel_speedup", 1.0)),
+        rise_speedup=float(arms_raw.get("rise_speedup", 1.0)),
         z_clear=_float(arms_raw, "z_clear"),
         z_grasp=_float(arms_raw, "z_grasp"),
         gripper_open=_float(arms_raw, "gripper_open"),
