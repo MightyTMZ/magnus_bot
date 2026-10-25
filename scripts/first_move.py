@@ -38,7 +38,7 @@ from magnus_bot.kinematics.so101_ik import SO101Kinematics
 
 ARM = "follower_1"
 PIECE = "rook"
-HOVER = 0.06  # low first-move hover (m); full z_clear needs the tilt work
+HOVER = 0.10  # lift / travel height (m): 6 cm let carried pieces drop (2026-10-25); 12 cm breaks h3/h4
 DEFAULT_PITCH_DEG = 20.0  # until the rook's grasp is tuned (configs/grasp.yaml)
 SERVO_MAP = Path(__file__).resolve().parents[1] / "hardware" / "servo_maps" / f"{ARM}.json"
 

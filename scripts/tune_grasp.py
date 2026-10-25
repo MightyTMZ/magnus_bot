@@ -75,6 +75,9 @@ PIECES = {
     "pawn": chess.PAWN, "knight": chess.KNIGHT, "bishop": chess.BISHOP,
     "rook": chess.ROOK, "queen": chess.QUEEN, "king": chess.KING,
 }
+# Lift / travel height after a pick or place (fingertip, m). 2026-10-25: at 6 cm the carried piece hung
+# low enough to be dropped on the way; 10 cm still fits the servos' ranges on f-h (12 cm does not: h3/h4).
+HOVER = 0.10
 
 
 class ArmShuttle:
@@ -181,7 +184,8 @@ def main(argv: list[str] | None = None, prompt=input) -> int:
                         help="hold the stem this far back from the jaw tips (default: the pads, 23 mm); "
                              "less = nearer the tips, which saves reach on far squares")
     parser.add_argument("--trials", type=int, default=6, help="graded attempts per setting")
-    parser.add_argument("--hover", type=float, default=0.06, help="hover height, m (see first_move.py)")
+    parser.add_argument("--hover", type=float, default=HOVER,
+                        help="height the arm lifts to after a pick / place and travels at, m")
     parser.add_argument("--no-shuttle-back", action="store_true",
                         help="only attempt --uci forward; you put the piece back after each success")
     parser.add_argument("--max-misses", type=int, default=3,

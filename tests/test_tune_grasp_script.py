@@ -59,7 +59,9 @@ def test_too_steep_a_tilt_is_skipped_before_any_motion(tune, tmp_path, capsys):
 
 def test_grasp_heights_that_would_scrape_the_board_are_refused(tune, tmp_path, capsys):
     log = tmp_path / "sim.jsonl"
-    assert tune.main(["--pitches", "0", "--z-offsets=-4,0", "--trials", "2", "--log", str(log)]) == 0
+    # 6 cm hover: straight down cannot hover at the 10 cm default (wrist limit). Tests the scrape guard.
+    argv = ["--pitches", "0", "--z-offsets=-4,0", "--hover", "0.06", "--trials", "2", "--log", str(log)]
+    assert tune.main(argv) == 0
     out = capsys.readouterr().out
     assert "z -4 mm" in out and "jaw tips would scrape" in out
     assert {r["z_offset_mm"] for r in attempts(log)} == {0.0}  # only the safe height ran
