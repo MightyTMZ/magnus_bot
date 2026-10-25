@@ -6,7 +6,9 @@ server publishes the latest per-square reading over localhost; this module is th
 that link — plain data plus urllib, so magnus_bot never imports cv2 or torch.
 
 Squares are named as in python-chess (``"g3"``). Colors are ``"W"``, ``"B"``, or ``"?"``
-(occupied, color unknown — the detector's generic "pieces" class).
+(occupied, color unknown — the detector's generic "pieces" class). The green-painted fingertip
+(``marker``) is a board position in SQUARES: x toward the h-file, y toward rank 8, origin at a1's
+outer corner (a1's center is (0.5, 0.5)); multiply by the square size for meters.
 """
 
 from __future__ import annotations
@@ -32,15 +34,22 @@ class BoardObservation:
     frame_id: int = 0
     timestamp: float = 0.0
     stable: bool = True
+    marker: tuple[float, float] | None = None  # fingertip, board squares (see module docstring)
+    marker_seen: int = 0  # readings in the window that saw the fingertip
+    board_visible: bool = True
 
     @classmethod
     def from_json(cls, data: dict) -> BoardObservation:
+        marker = data.get("marker")
         return cls(
             occupancy={str(sq): str(c) for sq, c in data["occupancy"].items()},
             pieces={str(sq): str(name) for sq, name in data.get("pieces", {}).items()},
             frame_id=int(data.get("frame_id", 0)),
             timestamp=float(data.get("timestamp", 0.0)),
             stable=bool(data.get("stable", False)),
+            marker=(float(marker[0]), float(marker[1])) if marker else None,
+            marker_seen=int(data.get("marker_seen", 0)),
+            board_visible=bool(data.get("board_visible", True)),
         )
 
 

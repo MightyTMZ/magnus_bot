@@ -7,6 +7,8 @@ BOARD_SIZE = 800
 SQUARE = BOARD_SIZE // 8
 # Higher camera: sample farther up the box so the point stays on the piece's square.
 FOOT = 0.35
+# Fallback near the base: tall pieces on the far ranks put the FOOT point past the board's far edge.
+BASE_FOOT = 0.08
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CROP_PATH = os.path.join(HERE, "crop.json")
@@ -31,15 +33,21 @@ def save_crop(x, y, w, h, path=CROP_PATH):
         json.dump({"x": int(x), "y": int(y), "w": int(w), "h": int(h)}, f)
 
 
-def prep_frame(frame):
+_FROM_FILE = object()
+
+
+def prep_frame(frame, crop=_FROM_FILE):
     """Rotate then crop a raw camera frame.
 
     MUST be applied identically in calibration and detection so corners.json and
-    the Roboflow detections live in the same coordinate space.
+    the detections live in the same coordinate space. ``crop`` defaults to reading
+    crop.json now; a long-running process should pass the crop it loaded together
+    with corners.json, so the two can never come from different calibrations.
     """
     if ROTATE_CODE is not None:
         frame = cv2.rotate(frame, ROTATE_CODE)
-    crop = load_crop()
+    if crop is _FROM_FILE:
+        crop = load_crop()
     if crop:
         x, y, w, h = crop
         frame = frame[y:y + h, x:x + w]
@@ -52,6 +60,20 @@ def load_homography(path=CORNERS_PATH):
     src = np.float32(corners)
     dst = np.float32([[0, 0], [BOARD_SIZE, 0], [BOARD_SIZE, BOARD_SIZE], [0, BOARD_SIZE]])
     return cv2.getPerspectiveTransform(src, dst)
+
+def pixel_to_board(x, y, H):
+    """Image pixel -> board position in squares: (x toward the h-file, y toward rank 8), origin at
+    a1's outer corner, so a1's center is (0.5, 0.5). Exact for points ON the board surface."""
+    fx, fy = cv2.perspectiveTransform(np.float32([[[x, y]]]), H)[0][0]
+    return float(fx) / SQUARE, 8.0 - float(fy) / SQUARE
+
+
+def board_to_pixel(bx, by, H):
+    """Inverse of pixel_to_board."""
+    flat = np.float32([[[bx * SQUARE, (8.0 - by) * SQUARE]]])
+    px, py = cv2.perspectiveTransform(flat, np.linalg.inv(H))[0][0]
+    return float(px), float(py)
+
 
 def point_to_square(x,y,H):
     pt = np.float32([[[x,y]]])
@@ -69,9 +91,20 @@ def box_anchor(box):
     x1, y1, x2, y2 = box
     return (x1 + x2) / 2, y2 - FOOT * (y2 - y1)
 
-def box_to_square(box,H):
+def piece_point(box, H):
+    """(x, y, square) for a detection: the FOOT anchor, or, when that lands off the board (a tall
+    piece on a far rank), a point near the base. Only boxes that would otherwise be dropped move."""
     x, y = box_anchor(box)
-    return point_to_square(x,y,H)
+    square = point_to_square(x, y, H)
+    if square is None:
+        x1, y1, x2, y2 = box
+        x, y = (x1 + x2) / 2, y2 - BASE_FOOT * (y2 - y1)
+        square = point_to_square(x, y, H)
+    return x, y, square
+
+
+def box_to_square(box,H):
+    return piece_point(box, H)[2]
 
 def build_pieces(detections, H):
     """Class name of the most confident detection on each square, e.g. {"g3": "white-rook"}."""
@@ -130,8 +163,7 @@ def draw_grid(frame, H):
 def draw_points(frame, detections, H):
     """Draw the point used for each piece, colored by color, with its square name."""
     for box, name in zip(detections.xyxy, detections.data["class_name"]):
-        x, y = box_anchor(box)
-        square = point_to_square(x, y, H)
+        x, y, square = piece_point(box, H)
         dot = (255, 255, 255) if name.startswith("white") else (0, 0, 255)
         cv2.circle(frame, (int(x), int(y)), 5, dot, -1)
         cv2.putText(frame, square or "off", (int(x) + 6, int(y)),

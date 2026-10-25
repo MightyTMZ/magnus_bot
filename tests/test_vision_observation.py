@@ -27,6 +27,14 @@ def test_observation_from_json():
     assert (obs.frame_id, obs.timestamp, obs.stable) == (42, 1.5, True)
 
 
+def test_fingertip_marker_and_board_visibility_are_parsed():
+    obs = BoardObservation.from_json({**BOARD_JSON, "marker": [6.65, 3.82], "marker_seen": 4,
+                                      "board_visible": False})
+    assert obs.marker == (6.65, 3.82) and obs.marker_seen == 4 and obs.board_visible is False
+    older = BoardObservation.from_json(BOARD_JSON)  # a server without the marker fields
+    assert older.marker is None and older.marker_seen == 0 and older.board_visible is True
+
+
 def test_readers_satisfy_the_protocol():
     assert isinstance(HttpBoardReader(), BoardReader)
     assert isinstance(SimulatedBoard({}), BoardReader)
