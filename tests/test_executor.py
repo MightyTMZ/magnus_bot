@@ -14,6 +14,7 @@ from magnus_bot.geometry.frames import arm_placements
 from magnus_bot.hardware.sim_arm import SimArm
 from magnus_bot.kinematics.conventions import model_to_urdf, urdf_to_model
 from magnus_bot.kinematics.model import JointLimit
+from magnus_bot.kinematics.reach import ReachabilityMap
 from magnus_bot.kinematics.so101_ik import SO101Kinematics, Unreachable
 from magnus_bot.orchestration.executor import (
     VERIFY_TOLERANCE,
@@ -73,19 +74,49 @@ def _sim(config, **kwargs):
     return arms, Executor(config, arms, _full_reach_map(config), simulate=True, **kwargs)
 
 
-def test_simulate_moves_only_the_assigned_arm_and_parks_it_high():
-    from magnus_bot.orchestration.executor import PARK_REACH
+def test_simulate_moves_only_the_assigned_arm_and_leaves_it_up():
+    from magnus_bot.orchestration.executor import VIA_REACH
 
     config = _low_clear()
     arms, executor = _sim(config)
     executor.execute_move(ROOK_H4, H4H5)
     assert arms["follower_1"].command_log
     assert not arms["follower_2"].command_log  # one arm at a time; the other is untouched
-    # It ends parked high above its own board edge, not back down where it started (2026-10-25).
+    # It ends up at travel height near its own board edge, not back down where it started.
     tip = config.arms.correction("follower_1").undo(
         SO101Kinematics().forward(urdf_to_model(arms["follower_1"].read_joints())))
-    assert np.hypot(tip[0], tip[1]) == pytest.approx(PARK_REACH, abs=1e-3)
-    assert tip[2] >= 0.14
+    assert np.hypot(tip[0], tip[1]) == pytest.approx(VIA_REACH, abs=1e-3)
+    assert tip[2] == pytest.approx(config.arms.z_clear, abs=1e-3)
+
+
+def test_after_letting_go_on_the_pad_the_jaws_only_go_up(config_dir):
+    # 2026-10-25: after placing the bishop on e3, the wrist swung the open jaws down and back into it.
+    from magnus_bot.config import TunedGrasp, save_tuned_grasp
+
+    cfg_dir = config_dir(measured=False)
+    save_tuned_grasp(cfg_dir, "bishop", TunedGrasp(pitch_deg=40.0, z_offset_mm=0.0))
+    config = load_config(cfg_dir)
+    config = dataclasses.replace(config, arms=dataclasses.replace(config.arms, z_clear=0.10))
+    arms, _ = _sim(config)
+    executor = Executor(config, arms, _full_reach_map(config), simulate=True, tuned_grasps=True)
+    board = chess.Board("rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2")
+    # follower_1 reaches f1, follower_2 reaches c4, both reach the pad: Bc4 is a handoff via e3.
+    rmap = ReachabilityMap(reachable={"follower_1": {(5, 0)}, "follower_2": {(2, 3)}},
+                           pad_reach={"follower_1", "follower_2"})
+    program = build_move_program(board, chess.Move.from_uci("f1c4"), rmap, config)
+    to_pad = next(s for s in program if s.transfer.reason.endswith("to-pad"))
+    traj = executor.plan([to_pad])[0]
+    at = {phase: i for i, phase in traj.checkpoints if phase != "dwell"}
+    kin, tp = SO101Kinematics(), SO101Kinematics().model.tip_to_pad
+    pads = []
+    for sample in traj.samples[at["release"]:]:
+        pts = kin.link_points(urdf_to_model(sample))
+        pads.append(pts[-1] - tp * (pts[-1] - pts[-2]) / np.linalg.norm(pts[-1] - pts[-2]))
+    heights = [p[2] for p in pads]
+    up = next(i for i, h in enumerate(heights) if h >= config.arms.z_clear)
+    rising = heights[:up + 1]
+    assert all(b >= a - 1e-4 for a, b in zip(rising, rising[1:], strict=False)), "the jaws dipped while low"
+    assert min(heights[up:]) >= config.arms.z_clear - 0.003  # and never come back down below travel height
 
 
 def test_simulated_grip_happens_at_the_source_square():

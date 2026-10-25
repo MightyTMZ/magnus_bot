@@ -74,12 +74,10 @@ EASE_GRIP_DEPTH = 0.010
 # swing from the square to rest dipped across the board and knocked pieces over (2026-10-25).
 VIA_REACH = 0.12
 VIA_PITCHES = (math.radians(45.0), math.radians(30.0), math.radians(15.0), 0.0)
-# After a move the arm PARKS high above the gap between its base and the board, instead of going
-# back down to the (often low) pose it started from: that last swing down swept the edge pieces
-# (2026-10-25). The next move starts from there. Highest height that fits the arm's limits wins.
-PARK_REACH = 0.10  # m out from the base (~2 cm over the board edge on this rig)
-PARK_HEIGHTS = (0.20, 0.18, 0.16, 0.14)
-PARK_PITCHES = tuple(math.radians(d) for d in range(0, 91, 5))
+# After a move the arm STAYS up at the via point (VIA_REACH out, travel height) instead of going back
+# down to the (often low) pose it started from: that last swing down swept the edge pieces
+# (2026-10-25). The next move starts from there. (A 14-20 cm park was tried: the real shoulder
+# could not get there.)
 # Before the gripper closes on a piece or lets go of one, the arm must be at the pose it was sent to
 # (within VERIFY_TOLERANCE), waiting up to this long (s) for it to settle. 2026-10-25 live: the elbow
 # stalled short of the h4 place pose, the gripper opened on schedule, and the rook fell onto the
@@ -323,14 +321,6 @@ def _arm_waypoints(arm_steps, config, home, placement, kinematics, limits, to_co
                 return cmd
         return None
 
-    def park(grip: float) -> dict[str, float] | None:
-        """High above the arm's own board edge, on its centre line; None if nothing fits."""
-        for z in PARK_HEIGHTS:
-            cmd = reachable(correction.apply(np.array([PARK_REACH, 0.0, z])), PARK_PITCHES, grip)
-            if cmd is not None:
-                return cmd
-        return None
-
     def via(xy_board: np.ndarray, grip: float) -> dict[str, float] | None:
         """Up at travel height near the arm's own board edge, on the line to ``xy_board``; None if no
         tilt reaches it (the move then goes without it)."""
@@ -384,6 +374,17 @@ def _arm_waypoints(arm_steps, config, home, placement, kinematics, limits, to_co
             check_limits(command, limits)
         except JointLimitError as exc:
             raise JointLimitError(f"{where}: {exc} [{choice.label}]") from exc
+        if step.phase == Phase.RETRACT and arm_steps.transfer.dst.kind == PAD:
+            # Off the pad (far reach for both arms): lift with the shoulder and elbow while the wrist
+            # holds, THEN square the wrist. Done together, a lagging elbow let the wrist swing the
+            # open jaws down and back into the piece just placed (2026-10-25, the bishop on e3).
+            arm_first = {**command, "wrist_flex": waypoints[-1]["wrist_flex"]}
+            try:
+                check_limits(arm_first, limits)
+                waypoints.append(arm_first)
+                travel.append("rise")
+            except JointLimitError:
+                pass  # cannot hold the wrist there: plain retract
         past = {n: math.degrees(max(stops[n].lo - v, v - stops[n].hi)) for n, v in command.items()
                 if stops and n in stops and not stops[n].lo - STOP_SLACK <= v <= stops[n].hi + STOP_SLACK}
         if past:
@@ -394,14 +395,11 @@ def _arm_waypoints(arm_steps, config, home, placement, kinematics, limits, to_co
                       else "near")
         if step.phase in UP_PHASES:  # up first: no sideways move before the arm is really up
             checkpoints.append((len(waypoints) - 1, step.phase.value))
-    if (high := park(gripper)) is not None:
-        waypoints.append(high)  # already up: back and further up to park, clear of the board
+    if (end := via(arm_steps.steps[-1].xyz[:2], gripper)) is not None:
+        waypoints.append(end)  # after the place: already up; now back toward the arm and STAY up
         travel.append("travel")
         return waypoints, checkpoints, travel
-    if (end := via(arm_steps.steps[-1].xyz[:2], gripper)) is not None:
-        waypoints.append(end)  # after the place: already up; now back toward the arm, still high
-        travel.append("travel")
-    waypoints.append(home)  # back to rest: clears the board (and the pad) for the other arm
+    waypoints.append(home)  # no via fits: back to rest (clears the board and the pad)
     travel.append("travel")
     return waypoints, checkpoints, travel
 
