@@ -30,6 +30,23 @@ from magnus_bot.kinematics.model import SO101Model
 IK_JOINTS = ("shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll")
 
 
+def tilted_tip_target(top_down_tip: np.ndarray, pitch: float, tip_to_pad: float) -> np.ndarray:
+    """Fingertip target (arm frame) that keeps the jaw PADS where a top-down grasp puts them.
+
+    Grasp heights are fingertip targets for a top-down grasp, with the pads ``tip_to_pad`` straight
+    above. Tilting the tool by ``pitch`` swings the pads back toward the base, so the jaws would close
+    ``tip_to_pad * sin(pitch)`` in front of the stem (10-13 mm at 25-35 deg: the 2026-10-24 live
+    misses). To keep the pads on the stem, the tip moves out along the reach by that much and up by
+    ``tip_to_pad * (1 - cos(pitch))``.
+    """
+    if pitch == 0.0:
+        return np.asarray(top_down_tip, dtype=float)
+    x, y, z = (float(v) for v in top_down_tip)
+    r = math.hypot(x, y)
+    out = tip_to_pad * math.sin(pitch)
+    return np.array([x + out * x / r, y + out * y / r, z + tip_to_pad * (1.0 - math.cos(pitch))])
+
+
 class Unreachable(ValueError):
     """Raised when a target lies outside the arm's dexterous workspace (planar 2-link reach)."""
 

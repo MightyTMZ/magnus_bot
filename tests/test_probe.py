@@ -126,16 +126,25 @@ def test_an_unseen_fingertip_is_reported_not_guessed():
     assert r.to_record()["camera_mm"] is None
 
 
-def report(joint_deg=0.0, geometry=(0.0, 0.0)):
-    return ProbeReport("g3", {"shoulder_lift": joint_deg}, (0.0, 0.0), 0.0, geometry, geometry)
+def report(joint_deg=0.0, geometry=(0.0, 0.0), square="g3"):
+    return ProbeReport(square, {"shoulder_lift": joint_deg}, (0.0, 0.0), 0.0, geometry, geometry)
 
 
 def test_verdict_names_motors_and_geometry_separately():
     assert verdict([report()]) == [
         "motors OK: every joint within 1.5 deg of its command.",
-        "geometry OK: the camera agrees with the model within 5 mm.",
+        "geometry OK: on average within 5 mm, and every square within 10 mm.",
     ]
     lines = verdict([report(joint_deg=-4.0, geometry=(-15.0, 2.0))])
     assert lines[0].startswith("MOTORS: shoulder_lift ended -4.0 deg")
     assert lines[1].startswith("GEOMETRY: on average the tip lands -15 mm along the reach")
     assert verdict([]) == ["nothing was probed"]
+
+
+def test_errors_that_cancel_on_average_are_still_reported():
+    # The 2026-10-24 live run: sideways errors of -20 and +10 mm averaged to about zero.
+    reports = [report(geometry=(-5.0, -20.0), square="g3"), report(geometry=(3.0, -2.0), square="h4"),
+               report(geometry=(3.0, 4.0), square="g5"), report(geometry=(4.0, 10.0), square="g6")]
+    lines = verdict(reports)
+    assert not any(line.startswith("geometry OK") for line in lines)
+    assert any(line.startswith("GEOMETRY VARIES: g3 is off by -5 mm reach, -20 mm side") for line in lines)

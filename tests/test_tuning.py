@@ -21,8 +21,9 @@ class ScriptedWorld:
     """A board, and a shuttle whose physical results follow a script.
 
     Each transfer takes the next effect: "ok" moves the piece, "miss" leaves the board alone,
-    "drop" loses the piece, "stray" drops it on h8, "knock" moves it but knocks a1 off. When the
-    script runs out every transfer is "ok".
+    "drop" loses the piece, "stray" drops it on h5, "knock" moves it but knocks the h4 neighbour
+    off, "flicker" moves it while a far square (a8) blinks into view. When the script runs out
+    every transfer is "ok".
     """
 
     def __init__(self, occupancy, script=()):
@@ -37,12 +38,14 @@ class ScriptedWorld:
         if effect == "miss":
             return
         piece = self.occupancy.pop(src)
-        if effect in ("ok", "knock"):
+        if effect in ("ok", "knock", "flicker"):
             self.occupancy[dst] = piece
         if effect == "knock":
-            self.occupancy.pop("a1", None)
+            self.occupancy.pop("h4", None)
+        if effect == "flicker":
+            self.occupancy["a8"] = "B"
         if effect == "stray":
-            self.occupancy["h8"] = piece
+            self.occupancy["h5"] = piece
 
     def read(self, fresh=True, timeout=8.0):  # BoardReader
         self.frame += 1
@@ -178,15 +181,23 @@ def test_lost_piece_waits_for_the_operator_then_resumes():
 
 
 def test_knocked_bystander_stops_even_though_the_move_worked():
-    world = ScriptedWorld({"g3": "W", "a1": "B"}, ["knock"])
+    world = ScriptedWorld({"g3": "W", "h4": "B"}, ["knock"])
 
     def operator(message):
-        world.occupancy["a1"] = "B"  # stands the neighbour back up
+        world.occupancy["h4"] = "B"  # stands the neighbour back up
         return ""
 
     results, _ = sweep(world, trials=2, prompt=operator)
     assert results[0].outcomes["g3g4"][Outcome.DISTURBED] == 1
     assert world.transfers == ["g3g4", "g4g3"]  # resumes from where the rook actually is
+
+
+def test_flicker_far_from_the_move_does_not_fail_it():
+    # 2026-10-24 live: a good g4g5 move was graded "disturbed" because e2 and h7 flickered.
+    world = ScriptedWorld({"g3": "W", "h7": "B"}, ["flicker"])
+    results, log = sweep(world, trials=1)  # no prompt: a non-success would raise
+    assert results[0].successes == 1
+    assert log[0]["far_flicker"] == {"a8": [None, "B"]}
 
 
 def test_operator_can_quit():

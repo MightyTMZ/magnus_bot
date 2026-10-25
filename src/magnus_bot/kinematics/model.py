@@ -75,6 +75,9 @@ class SO101Model:
     # wrist_flex -> gripper_frame_link (grasp point), in-plane. The full 3-D length is 0.1605;
     # the other 1.83 cm runs along the pitch axis and only cancels the shoulder's lateral offset.
     wrist_to_tip: float = 0.1594
+    # Fingertip (the IK target) -> centre of the jaw pads, back up the tool axis. MEASURED 2026-10-24
+    # (board.yaml derives each piece's fingertip grasp_height as its neck height minus this).
+    tip_to_pad: float = 0.023
 
     limits: dict[str, JointLimit] = None  # type: ignore[assignment]
 

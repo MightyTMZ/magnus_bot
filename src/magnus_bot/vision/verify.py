@@ -78,6 +78,30 @@ def relocate(occupancy: Occupancy, src: str, dst: str) -> Occupancy:
     return after
 
 
+def neighborhood(squares: Iterable[str], radius: int = 1) -> set[str]:
+    """Every square within ``radius`` king moves of any of ``squares``."""
+    out = set()
+    for name in squares:
+        index = chess.parse_square(name)
+        f, r = chess.square_file(index), chess.square_rank(index)
+        for df in range(-radius, radius + 1):
+            for dr in range(-radius, radius + 1):
+                if 0 <= f + df < 8 and 0 <= r + dr < 8:
+                    out.add(chess.square_name(chess.square(f + df, r + dr)))
+    return out
+
+
+def restrict(occupancy: Occupancy, zone: set[str]) -> Occupancy:
+    """Only the squares in ``zone``."""
+    return {s: c for s, c in occupancy.items() if s in zone}
+
+
+def changes_outside(before: Occupancy, after: Occupancy, zone: set[str]) -> dict[str, list[str | None]]:
+    """Squares outside ``zone`` whose reading changed: detection flicker, not something the arm did."""
+    return {s: [before.get(s), after.get(s)] for s in sorted(set(before) | set(after))
+            if s not in zone and before.get(s) != after.get(s)}
+
+
 def _matches(expected: str | None, seen: str | None) -> bool:
     if expected is None or seen is None:
         return expected is None and seen is None

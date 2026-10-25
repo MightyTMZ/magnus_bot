@@ -21,7 +21,7 @@ from magnus_bot.geometry import board as board_geom
 from magnus_bot.geometry.frames import ArmPlacement
 from magnus_bot.kinematics.conventions import model_to_urdf
 from magnus_bot.kinematics.model import JointLimit
-from magnus_bot.kinematics.so101_ik import SO101Kinematics, Unreachable
+from magnus_bot.kinematics.so101_ik import SO101Kinematics, Unreachable, tilted_tip_target
 
 Square = tuple[int, int]  # (file, rank)
 
@@ -122,7 +122,8 @@ def reach_pose(
 
 def _in_limits(kinematics, x, y, z, pitch, limits, to_urdf) -> bool:
     try:
-        joints = to_urdf(kinematics.inverse(np.array([x, y, z]), pitch=pitch))
+        target = tilted_tip_target(np.array([x, y, z]), pitch, kinematics.model.tip_to_pad)
+        joints = to_urdf(kinematics.inverse(target, pitch=pitch))
     except Unreachable:
         return False
     return all(limits[n].lo <= v <= limits[n].hi for n, v in joints.items())

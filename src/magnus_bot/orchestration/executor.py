@@ -37,7 +37,7 @@ from magnus_bot.hardware.sim_arm import SimArm
 from magnus_bot.kinematics.conventions import model_to_urdf
 from magnus_bot.kinematics.model import JointLimit
 from magnus_bot.kinematics.reach import ReachabilityMap
-from magnus_bot.kinematics.so101_ik import SO101Kinematics, Unreachable
+from magnus_bot.kinematics.so101_ik import SO101Kinematics, Unreachable, tilted_tip_target
 from magnus_bot.motion.primitives import CLOSE, OPEN, MotionStep, pick_place_steps
 from magnus_bot.motion.trajectory import plan_joint_trajectory
 from magnus_bot.planning.assigner import HANDOFF, SINGLE, assign_transfers
@@ -155,7 +155,8 @@ def plan_joint_program(
 ) -> list[ArmTrajectory]:
     """Joint trajectories for a whole program, each starting and ending at that arm's ``rest`` pose.
 
-    ``pitch`` tilts the tool off vertical for every grasp waypoint (0 = top-down). Raises
+    ``pitch`` tilts the tool off vertical for every grasp waypoint (0 = top-down), keeping the jaw
+    pads where a top-down grasp would put them (:func:`tilted_tip_target`). Raises
     :class:`Unreachable` or :class:`JointLimitError` (with arm, transfer and phase) if any waypoint
     cannot be commanded. Pure: nothing is sent to any arm.
     """
@@ -173,8 +174,9 @@ def plan_joint_program(
                 gripper = config.arms.gripper_closed
             where = f"{arm_steps.arm_id} {arm_steps.transfer.reason} {step.phase.value}"
             x, y = placement.board_to_arm(step.xyz[:2])
+            target = tilted_tip_target(np.array([x, y, step.xyz[2]]), pitch, kinematics.model.tip_to_pad)
             try:
-                model = kinematics.inverse(np.array([x, y, step.xyz[2]]), pitch=pitch)
+                model = kinematics.inverse(target, pitch=pitch)
             except Unreachable as exc:
                 raise Unreachable(f"{where}: {exc}") from exc
             command = to_command(model) if to_command else dict(model)

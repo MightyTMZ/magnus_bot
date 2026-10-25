@@ -39,7 +39,9 @@ from magnus_bot.orchestration.executor import check_limits
 JointMap = Callable[[Mapping[str, float]], dict[str, float]]
 
 MOTOR_GAP_DEG = 1.5  # a reached-vs-commanded gap above this counts as the motors not getting there
-GEOMETRY_GAP_MM = 5.0  # a camera-vs-model gap above this counts as a geometry error
+GEOMETRY_GAP_MM = 5.0  # an AVERAGE camera-vs-model gap above this: one offset everywhere (e.g. edge_gap)
+SQUARE_GAP_MM = 10.0  # any ONE square off by more than this: the error varies across the board
+HEIGHT_GAP_MM = 2.0  # an average ruler-vs-commanded height gap above this is a height error
 
 
 def square_xy(square: str, square_size: float) -> np.ndarray:
@@ -132,6 +134,7 @@ class ProbeReport:
     camera_mm: tuple[float, float] | None  # (reach, side) of the seen fingertip from the target
     geometry_mm: tuple[float, float] | None  # camera minus model: what the joints do not explain
     parallax_mm: tuple[float, float] | None = None  # apparent shift per 10 mm of height, if measured
+    height_error_mm: float | None = None  # ruler gap minus commanded height (- = tip lower than told)
 
     @property
     def worst_joint(self) -> tuple[str, float]:
@@ -154,6 +157,9 @@ class ProbeReport:
                        f"{self.camera_mm[1]:+.0f} mm sideways from the square's center")
             out.append(f"  geometry (camera minus model): {self.geometry_mm[0]:+.0f} mm reach, "
                        f"{self.geometry_mm[1]:+.0f} mm side")
+        if self.height_error_mm is not None:
+            out.append(f"  height (ruler): tip is {self.height_error_mm:+.1f} mm from the commanded height "
+                       "(- = lower than told)")
         return out
 
     def to_record(self) -> dict:
@@ -165,6 +171,7 @@ class ProbeReport:
             "camera_mm": None if self.camera_mm is None else [round(v, 1) for v in self.camera_mm],
             "geometry_mm": None if self.geometry_mm is None else [round(v, 1) for v in self.geometry_mm],
             "parallax_mm": None if self.parallax_mm is None else [round(v, 2) for v in self.parallax_mm],
+            "height_error_mm": None if self.height_error_mm is None else round(self.height_error_mm, 1),
         }
 
 
@@ -177,10 +184,12 @@ def analyze(
     to_model: JointMap,
     camera_xy: np.ndarray | None,
     camera_xy2: np.ndarray | None = None,
+    measured_gap_mm: float | None = None,
 ) -> ProbeReport:
     """Grade one held pose: ``reached`` are the joint angles read back at the low hold (command
     convention), ``camera_xy`` / ``camera_xy2`` where the camera saw the fingertip at the low hold
-    and at ``plan.z2`` (board frame, m; None if not seen). With both, parallax is removed."""
+    and at ``plan.z2`` (board frame, m; None if not seen). With both, parallax is removed.
+    ``measured_gap_mm`` is the tip-to-board gap the operator measured at the low hold, if any."""
     errors = {n: math.degrees(reached[n] - plan.at[n]) for n in ARM_JOINTS}
     tip = kinematics.forward(to_model(reached))
     model_xy = placement.arm_to_board(tip[:2])
@@ -202,6 +211,7 @@ def analyze(
         camera_mm=camera_mm,
         geometry_mm=geometry_mm,
         parallax_mm=parallax_mm,
+        height_error_mm=None if measured_gap_mm is None else measured_gap_mm - 1000 * plan.target_z,
     )
 
 
@@ -217,16 +227,33 @@ def verdict(reports: list[ProbeReport]) -> list[str]:
                    "fix control first.")
     else:
         out.append(f"motors OK: every joint within {MOTOR_GAP_DEG} deg of its command.")
+    heights = [r.height_error_mm for r in reports if r.height_error_mm is not None]
+    if heights:
+        mean = float(np.mean(heights))
+        if abs(mean) >= HEIGHT_GAP_MM:
+            out.append(f"HEIGHT: by ruler the tip sits {mean:+.1f} mm from the commanded height on average "
+                       f"({'lower' if mean < 0 else 'higher'} than told): grasps aim that far "
+                       f"{'too low' if mean < 0 else 'too high'}.")
+        else:
+            out.append(f"height OK: by ruler within {HEIGHT_GAP_MM:.0f} mm of the commanded height.")
     seen = [r for r in reports if r.geometry_mm is not None]
     if not seen:
         out.append("camera: the fingertip was never seen, so geometry could not be measured.")
         return out
     reach = float(np.mean([r.geometry_mm[0] for r in seen]))
     side = float(np.mean([r.geometry_mm[1] for r in seen]))
-    if max(abs(reach), abs(side)) >= GEOMETRY_GAP_MM:
+    worst = max(seen, key=lambda r: max(abs(r.geometry_mm[0]), abs(r.geometry_mm[1])))
+    worst_mm = max(abs(worst.geometry_mm[0]), abs(worst.geometry_mm[1]))
+    systematic = max(abs(reach), abs(side)) >= GEOMETRY_GAP_MM
+    if systematic:
         out.append(f"GEOMETRY: on average the tip lands {reach:+.0f} mm along the reach and {side:+.0f} mm "
                    "sideways from where the config says it should. The config geometry is off (arm base "
                    "position / edge_gap, link lengths, joint zeros): calibrate.")
-    else:
-        out.append(f"geometry OK: the camera agrees with the model within {GEOMETRY_GAP_MM:.0f} mm.")
+    if worst_mm >= SQUARE_GAP_MM:
+        out.append(f"GEOMETRY VARIES: {worst.square} is off by {worst.geometry_mm[0]:+.0f} mm reach, "
+                   f"{worst.geometry_mm[1]:+.0f} mm side. The error changes from square to square (a joint "
+                   "scale or zero, a base rotation), so no single offset fixes it.")
+    if not systematic and worst_mm < SQUARE_GAP_MM:
+        out.append(f"geometry OK: on average within {GEOMETRY_GAP_MM:.0f} mm, and every square within "
+                   f"{SQUARE_GAP_MM:.0f} mm.")
     return out

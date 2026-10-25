@@ -69,6 +69,16 @@ def test_sim_probe_removes_camera_parallax(probe, tmp_path, capsys):
     assert row["z2_m"] == 0.04 and row["camera_squares_z2"] is not None
 
 
+def test_ruler_heights_are_asked_at_each_hold_and_reported(probe, tmp_path, capsys):
+    gaps = iter(["6", "5.5"])  # the operator measured 6 and 5.5 mm where 10 was commanded
+    argv = ["--squares", "g3,h4", "--ask-height", "--log", str(tmp_path / "p.jsonl")]
+    assert probe.main(argv, prompt=lambda message: next(gaps)) == 0
+    out = capsys.readouterr().out
+    assert "height (ruler): tip is -4.0 mm" in out
+    assert "HEIGHT: by ruler the tip sits -4.2 mm from the commanded height" in out
+    assert [r["height_error_mm"] for r in records(tmp_path / "p.jsonl")] == [-4.0, -4.5]
+
+
 def test_single_height_probe_still_works(probe, tmp_path, capsys):
     assert probe.main(["--squares", "g3", "--z2", "0", "--log", str(tmp_path / "p.jsonl")]) == 0
     assert "parallax removed" not in capsys.readouterr().out

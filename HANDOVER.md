@@ -67,6 +67,18 @@ tip landed +29 +/- 2 mm toward follower_1's base on g3/f4/h4/f6: a GEOMETRY erro
   edge_gap. With the true geometry follower_1 reaches 18 squares top-down (was 22; f4-f6 at 10 mm
   are out); with <= 50 deg tilt the whole board is still reachable. follower_2 NOT probed yet.
 - `orchestration/bench.py`: shared board printout + hold-then-release shutdown for bench scripts.
+- **Re-probe after the fix (g3/h4/g5/g6):** reach error within +/- 6 mm. Sideways still up to
+  20 mm at g3, growing with distance from the arm's centre line (pan less than commanded? or a
+  marker artefact when the gripper is rotated): unresolved. The verdict used to AVERAGE this away
+  ("geometry OK"); it now also flags any single square off by > 10 mm (GEOMETRY VARIES).
+- **First real pick-and-place:** g4->g5 at 30 deg, 1 of 6 (near the centre line on purpose).
+  The camera graded that success "disturbed" because far squares (e2, h7, g8...) flickered:
+  grading now only watches squares within one king move of the move (far changes are logged as
+  `far_flicker`). Operator saw the jaws close BESIDE the stem and the tip hit the table: the
+  tilted grasp aimed the FINGERTIP at the square, leaving the pads 23*sin(tilt) = 10-13 mm in
+  front of the stem. `tilted_tip_target` now aims the PADS at the top-down pad point (planner and
+  reach map both). Height was never calibrated: `reach_probe.py --ask-height` records a ruler gap
+  at each hold.
 
 ## Earlier session (2026-10-24, Alex + Claude) — vision online, closed grasp-tuning loop
 - **Why:** live grasps kept missing (g3g4 at 20° tilt failed twice) and every miss had to be

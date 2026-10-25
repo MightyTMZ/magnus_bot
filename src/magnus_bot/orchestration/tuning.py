@@ -31,7 +31,15 @@ from dataclasses import dataclass, field
 from typing import Protocol
 
 from magnus_bot.vision.observation import BoardObservation, BoardReader, Occupancy
-from magnus_bot.vision.verify import Outcome, TransferCheck, check_transfer, relocate
+from magnus_bot.vision.verify import (
+    Outcome,
+    TransferCheck,
+    changes_outside,
+    check_transfer,
+    neighborhood,
+    relocate,
+    restrict,
+)
 
 
 @dataclass(frozen=True)
@@ -114,6 +122,7 @@ def run_sweep(
     max_misses: int = 3,
     max_failed_settings: int = 3,
     vision_timeout: float = 8.0,
+    watch_radius: int = 1,
     results: list[SettingResult] | None = None,
     clock: Callable[[], float] = time.time,
 ) -> list[SettingResult]:
@@ -121,9 +130,12 @@ def run_sweep(
 
     The piece starts on ``home``. With ``shuttle_back`` it then alternates direction; without,
     every attempt is ``home -> away`` and the operator puts the piece back after each success.
+    Only squares within ``watch_radius`` king moves of the two squares are graded: the arm cannot
+    disturb a piece farther away, so a change there is detection flicker (logged, not failed).
     Results are appended to ``results`` as they come, so pass your own list to keep them if the
     sweep stops early.
     """
+    zone = neighborhood([home, away], watch_radius)
     results = [] if results is None else results
 
     def ask(message: str, check: TransferCheck | None = None) -> None:
@@ -143,8 +155,9 @@ def run_sweep(
         dst = away if src == home else home
         shuttle.transfer(src, dst)
         after = reader.read(fresh=True, timeout=vision_timeout)
-        expected = relocate(before.occupancy, src, dst)
-        return src, dst, after, check_transfer(before.occupancy, expected, after.occupancy)
+        near_before = restrict(before.occupancy, zone)
+        check = check_transfer(near_before, relocate(near_before, src, dst), restrict(after.occupancy, zone))
+        return src, dst, after, check
 
     def probe(before: BoardObservation, streak: int) -> BoardObservation | None:
         """Several settings in a row kept missing: bad settings, or a broken setup (piece lying down,
@@ -200,6 +213,7 @@ def run_sweep(
                 "outcome": check.outcome.value,
                 "detail": check.describe(),
                 "piece_on_dst": after.pieces.get(dst),
+                "far_flicker": changes_outside(before.occupancy, after.occupancy, zone),
                 "frames": [before.frame_id, after.frame_id],
             })
             before = after

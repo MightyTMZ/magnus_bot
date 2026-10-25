@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 
 from magnus_bot.kinematics.model import SO101Model
-from magnus_bot.kinematics.so101_ik import SO101Kinematics, Unreachable
+from magnus_bot.kinematics.so101_ik import SO101Kinematics, Unreachable, tilted_tip_target
 
 Z = 0.028  # a representative grasp height (pawn)
 
@@ -126,3 +126,16 @@ def test_cross_check_placo_matches_urdf_geometry():
     tip = kinematics.forward_kinematics(np.zeros(6))[:3, 3]
     # Zero-pose tip computed from the URDF transforms (see docs/joint_conventions.md).
     assert np.allclose(tip, [0.3914, 0.0, 0.2265], atol=2e-3)
+
+
+@pytest.mark.parametrize("deg", [0, 25, 30, 35])
+def test_tilted_grasp_keeps_the_jaw_pads_on_the_stem(deg):
+    # 2026-10-24 live: aiming the FINGERTIP at the square left the pads 10-13 mm in front of the
+    # stem at 25-35 deg, so the jaws closed beside it. The pads must sit where top-down puts them.
+    kin = SO101Kinematics()
+    tp, pitch = kin.model.tip_to_pad, math.radians(deg)
+    top_down_tip = np.array([0.20, 0.03, 0.005])
+    wrist, tip = kin.link_points(kin.inverse(tilted_tip_target(top_down_tip, pitch, tp), pitch=pitch))[2:]
+    pad = tip - tp * (tip - wrist) / np.linalg.norm(tip - wrist)
+    assert pad == pytest.approx(top_down_tip + np.array([0.0, 0.0, tp]), abs=1e-6)
+    assert tip[2] >= top_down_tip[2] - 1e-9  # tilting never lowers the tip toward the board

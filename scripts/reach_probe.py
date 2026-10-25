@@ -133,6 +133,8 @@ def main(argv: list[str] | None = None, prompt=input) -> int:
                         help="seconds to let the servos settle at the hold")
     parser.add_argument("--gripper", type=float, default=None,
                         help="gripper percent during the probe (default: arms.yaml gripper_closed)")
+    parser.add_argument("--ask-height", action="store_true",
+                        help="at each low hold, wait while you measure the tip-to-board gap (mm)")
     parser.add_argument("--live", action="store_true", help="drive the real arm (gated)")
     parser.add_argument("--vision-url", default=DEFAULT_VISION_URL)
     parser.add_argument("--vision-timeout", type=float, default=8.0)
@@ -253,6 +255,14 @@ def main(argv: list[str] | None = None, prompt=input) -> int:
                     time.sleep(args.settle)
                 reached = median_joints(arm)
                 marker = look()
+                gap = None
+                if args.ask_height:  # the arm holds here while the operator measures
+                    answer = prompt(f"  {plan.square}: gap from the green tip to the board, mm "
+                                    f"(commanded {args.z * 1000:.0f}; Enter to skip): ").strip()
+                    try:
+                        gap = float(answer) if answer else None
+                    except ValueError:
+                        print(f"  not a number ({answer!r}); skipping the height here", file=sys.stderr)
                 marker2 = None
                 if plan.at2 is not None:
                     stream(arm, plan.raise_to_z2(args.speed, HZ), args.live)
@@ -261,7 +271,8 @@ def main(argv: list[str] | None = None, prompt=input) -> int:
                     marker2 = look()
                 report = analyze(plan, reached, placement=placement, kinematics=kin, to_model=to_model,
                                  camera_xy=None if marker is None else np.array(marker) * size,
-                                 camera_xy2=None if marker2 is None else np.array(marker2) * size)
+                                 camera_xy2=None if marker2 is None else np.array(marker2) * size,
+                                 measured_gap_mm=gap)
                 reports.append(report)
                 print("\n".join(report.lines()))
                 fh.write(json.dumps({
