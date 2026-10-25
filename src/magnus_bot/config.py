@@ -101,6 +101,9 @@ class ArmsConfig:
     # reach / lands this much to its RIGHT. Commands go that much further / to its left. Missing = 0.
     reach_correction: dict[str, float] = field(default_factory=dict)
     side_correction: dict[str, float] = field(default_factory=dict)
+    # Per arm: every GRASP aims this far to the arm's left of the square (m), on top of the grasp's
+    # own side_offset_mm: the jaws open to one side of the aim point (operator, 2026-10-25).
+    grasp_side_offset: dict[str, float] = field(default_factory=dict)
 
     def correction(self, arm_id: str) -> ArmCorrection:
         return ArmCorrection(reach=self.reach_correction.get(arm_id, 0.0),
@@ -261,6 +264,7 @@ def load_config(config_dir: str | Path | None = None) -> Config:
         z_correction=_float_map(arms_raw, "z_correction"),
         reach_correction=_float_map(arms_raw, "reach_correction"),
         side_correction=_float_map(arms_raw, "side_correction"),
+        grasp_side_offset=_float_map(arms_raw, "grasp_side_offset"),
     )
 
     handoff = HandoffConfig(

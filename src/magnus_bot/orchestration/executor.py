@@ -239,7 +239,8 @@ def _arm_waypoints(arm_steps, config, home, placement, kinematics, limits, to_co
         where = f"{arm_steps.arm_id} {arm_steps.transfer.reason} {step.phase.value}"
         x, y = placement.board_to_arm(step.xyz[:2])
         z = choice.z if choice.z is not None and step.phase in at_grasp else step.xyz[2]
-        aim = ArmCorrection(side=choice.side).apply(np.array([x, y, z]))  # the jaws open sideways
+        side = choice.side + config.arms.grasp_side_offset.get(arm_steps.arm_id, 0.0)  # jaws open sideways
+        aim = ArmCorrection(side=side).apply(np.array([x, y, z]))
         target = correction.apply(tilted_tip_target(aim, choice.pitch, kinematics.model.tip_to_pad,
                                                     choice.grip_depth))
         tip_z = target[2] - correction.z  # where the real (sagging) tip goes

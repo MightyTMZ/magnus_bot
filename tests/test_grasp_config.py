@@ -128,3 +128,8 @@ def test_side_offset_is_saved_with_the_grasp(config_dir):
     save_tuned_grasp(cfg, "rook", TunedGrasp(pitch_deg=60.0, z_offset_mm=-9.0, side_offset_mm=5.0))
     (choice,) = load_config(cfg).grasp_choices("rook", ["f4", "f5"])
     assert choice.side == pytest.approx(0.005)
+
+
+def test_every_grasp_carries_the_arms_side_offset(config_dir):
+    config = load_config(config_dir(measured=False))
+    assert config.arms.grasp_side_offset["follower_1"] == pytest.approx(0.003)

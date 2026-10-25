@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from magnus_bot.cli import _full_reach_map
-from magnus_bot.config import load_config
+from magnus_bot.config import ArmCorrection, load_config
 from magnus_bot.geometry import board as board_geom
 from magnus_bot.geometry.frames import arm_placements
 from magnus_bot.hardware.sim_arm import SimArm
@@ -96,7 +96,11 @@ def test_simulated_grip_happens_at_the_source_square():
     # 1e-4 m (0.1 mm): the model<->URDF round-trip (model_to_urdf in the command, urdf_to_model
     # here) carries ~1e-5 float drift that varies with the arm configuration; far below any
     # physical relevance (and 50x tighter than the grasp tolerance).
-    assert xy == pytest.approx(board_geom.square_center(7, 3, config.board.square_size), abs=1e-4)
+    # ...aimed arms.grasp_side_offset to the arm's left of the centre (the jaws open to one side).
+    centre = placement.board_to_arm(board_geom.square_center(7, 3, config.board.square_size))
+    side = config.arms.grasp_side_offset.get("follower_1", 0.0)
+    aim = ArmCorrection(side=side).apply(np.append(centre, config.arms.z_grasp))
+    assert xy == pytest.approx(placement.arm_to_board(aim[:2]), abs=1e-4)
     assert real[2] == pytest.approx(config.arms.z_grasp, abs=1e-4)
 
 

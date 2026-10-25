@@ -28,6 +28,13 @@ side_correction:    # the arm lands this much to its RIGHT (+ = command further 
 z_correction:       # the arm sits this much LOWER than the model
   follower_1: 0.005
 
+# Every grasp aims this far to the arm's LEFT of the square's centre (m; rank 1 for follower_1), on
+# top of each tuned grasp's own side_offset_mm. The jaws open to one side of the aim point, so dead
+# centre lands a jaw on the piece's head. 2026-10-25: f-file and g4g5 grasps still came down on the
+# heads; operator: +2-3 mm more -> 3 mm.
+grasp_side_offset:
+  follower_1: 0.003
+
 # Default trajectory speed scale (0..1). Conservative by default.
 speed_scale: 0.3
 
