@@ -116,12 +116,25 @@ def find_markers(frame, H, lo, hi, min_area):
     return tips
 
 
-def pick_marker(markers, near=None, near_max=NEAR_MAX_SQUARES):
-    """The tip to report: nearest ``near`` (board squares) within ``near_max``, else the biggest."""
+def square_of(point):
+    """The square name a board point (in squares) falls on, or None off the board."""
+    f, r = int(np.floor(point[0])), int(np.floor(point[1]))
+    return f"{'abcdefgh'[f]}{r + 1}" if 0 <= f < 8 and 0 <= r < 8 else None
+
+
+def pick_marker(markers, near=None, near_max=NEAR_MAX_SQUARES, occupied=()):
+    """The tip to report: nearest ``near`` (board squares) within ``near_max``, else the biggest.
+
+    With ``near``, green on an OCCUPIED square (other than the one asked about) is ignored: the
+    pieces' green felt bases read as paint (2026-10-25: false tips on a1, c1, e1, g1, h2)."""
     if not markers:
         return None
     if near is None:
         return markers[0]
+    target = square_of(near)
+    markers = [m for m in markers if square_of(m["board"]) not in set(occupied) - {target}]
+    if not markers:
+        return None
     best = min(markers, key=lambda m: np.hypot(m["board"][0] - near[0], m["board"][1] - near[1]))
     if np.hypot(best["board"][0] - near[0], best["board"][1] - near[1]) > near_max:
         return None  # our tip is hidden; the one in view belongs to the other arm
@@ -256,7 +269,7 @@ class BoardState:
     def _payload(self, reading, stable, near=None):
         """Caller holds ``self.cond``. The marker is the median over the recent window of the tip
         nearest ``near`` (board squares; the biggest without it). ``markers`` lists every tip."""
-        picks = [pick_marker(r.markers, near) for r in self.recent]
+        picks = [pick_marker(r.markers, near, occupied=r.occupancy) for r in self.recent]
         seen = [m["board"] for m in picks if m]
         marker = None
         if seen:
