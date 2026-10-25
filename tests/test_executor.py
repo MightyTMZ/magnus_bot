@@ -244,8 +244,11 @@ def test_trajectories_mark_the_poses_where_the_gripper_acts():
     arms, executor = _sim(config)
     program = build_move_program(ROOK_H4, H4H5, _full_reach_map(config), config)
     traj = executor.plan(program)[0]
-    assert [phase for _, phase in traj.checkpoints] == ["grip", "release"]
-    (grip_at, _), (release_at, _) = traj.checkpoints
+    # Arrive before the gripper acts, pause after it acts, and be up before moving sideways.
+    expected = ["grip", "dwell", "lift", "release", "dwell", "retract"]
+    assert [phase for _, phase in traj.checkpoints] == expected
+    at = {phase: i for i, phase in traj.checkpoints if phase != "dwell"}
+    grip_at, release_at = at["grip"], at["release"]
     # Arrival at the pick pose, jaws still open; arrival at the place pose, jaws still closed.
     assert traj.samples[grip_at]["gripper"] == config.arms.gripper_open
     assert traj.samples[grip_at + 1]["gripper"] < config.arms.gripper_open  # closing starts after
@@ -350,3 +353,36 @@ def test_a_square_nudge_moves_only_that_squares_end_of_the_move():
     further = np.hypot(*tips[True]["release"]) - np.hypot(*tips[False]["release"])
     assert further == pytest.approx(0.010, abs=5e-4)  # h5 (the place) 10 mm further out
     assert tips[True]["grip"] == pytest.approx(tips[False]["grip"], abs=1e-6)  # h4 (the pick) untouched
+
+
+class _SaggingShoulderArm(SimArm):
+    """The lift never quite gets there: the shoulder reads back 4 deg low (past the tolerance)."""
+
+    def read_joints(self):
+        joints = super().read_joints()
+        joints["shoulder_lift"] += 0.07
+        return joints
+
+
+def test_a_lift_that_settles_a_little_off_does_not_stop_the_move(monkeypatch):
+    from magnus_bot.orchestration import executor as ex
+
+    monkeypatch.setattr(ex, "ARRIVE_TIMEOUT", 0.0)
+    config = _low_clear()
+    arms = {"follower_1": _SaggingShoulderArm("follower_1"), "follower_2": SimArm("follower_2")}
+    for arm in arms.values():
+        arm.connect()
+    executor = Executor(config, arms, _full_reach_map(config), simulate=True)
+    calls = []
+    real = executor._arrive
+
+    def arrive(arm, target, phase, strict=True):
+        calls.append((phase, strict))
+        if strict:
+            return None  # the gripper gates are not under test here
+        return real(arm, target, phase, strict)
+
+    executor._arrive = arrive
+    executor._verify = lambda arm, target: None
+    executor.execute_move(ROOK_H4, H4H5)  # no fault although the lift reads back 4 deg off
+    assert ("lift", False) in calls and ("retract", False) in calls

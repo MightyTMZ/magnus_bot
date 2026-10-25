@@ -80,6 +80,13 @@ VIA_PITCHES = (math.radians(45.0), math.radians(30.0), math.radians(15.0), 0.0)
 # g-file. Now the arm stops and holds instead.
 ARRIVE_TIMEOUT = 2.0
 GRIPPER_PHASES = (Phase.GRIP, Phase.RELEASE)
+# 2026-10-25: pieces were dragged along the board right after a pick and after a drop-off: the real
+# shoulder lags the plan, so the sideways move began while the arm was still low. Now the arm must
+# be UP (lift / retract read back) before moving sideways (moving on after ARRIVE_TIMEOUT rather
+# than faulting), and it pauses after the gripper closes / opens so the piece is held / let go.
+UP_PHASES = (Phase.LIFT, Phase.RETRACT)
+GRIPPER_DWELL = 0.3  # s
+DWELL = "dwell"
 
 
 class JointLimitError(ValueError):
@@ -317,8 +324,10 @@ def _arm_waypoints(arm_steps, config, home, placement, kinematics, limits, to_co
         waypoints.append(start)  # out of rest: up and over before reaching across the board
         travel.append(True)
     for step in arm_steps.steps:
-        if step.phase in GRIPPER_PHASES:
+        if step.phase in GRIPPER_PHASES:  # the arm must be there before the gripper acts
             checkpoints.append((len(waypoints) - 1, step.phase.value))
+        if step.phase in UP_PHASES:  # the step before (grip / release) ends with a pause
+            checkpoints.append((len(waypoints) - 1, DWELL))
         if step.gripper == OPEN:
             gripper = config.arms.gripper_open
         elif step.gripper == CLOSE:
@@ -353,6 +362,8 @@ def _arm_waypoints(arm_steps, config, home, placement, kinematics, limits, to_co
             raise BeyondServoStop(f"{where}: past the servo stop by {detail} [{choice.label}]")
         waypoints.append(command)
         travel.append(step.phase in TRAVEL_PHASES)
+        if step.phase in UP_PHASES:  # up first: no sideways move before the arm is really up
+            checkpoints.append((len(waypoints) - 1, step.phase.value))
     if (end := via(arm_steps.steps[-1].xyz[:2], gripper)) is not None:
         waypoints.append(end)  # after the place: already up; now back toward the arm, still high
         travel.append(True)
@@ -445,16 +456,22 @@ class Executor:
                     if period:
                         deadline += period
                         time.sleep(max(0.0, deadline - time.monotonic()))
-                    if i in gates:  # the gripper acts next: the arm must really be there
-                        self._arrive(arm, command, gates[i])
+                    if i in gates:
+                        if gates[i] == DWELL:
+                            if self.live:
+                                time.sleep(GRIPPER_DWELL)  # let the jaws finish closing / opening
+                        else:  # the gripper acts next, or the arm moves sideways next
+                            self._arrive(arm, command, gates[i], strict=gates[i] not in
+                                         {ph.value for ph in UP_PHASES})
                         deadline = time.monotonic()
                 self._verify(arm, traj.samples[-1])
         except Exception as exc:
             self._hold_all()
             raise ExecutionFault(f"motion aborted, arms holding: {exc}") from exc
 
-    def _arrive(self, arm: Arm, target: dict[str, float], phase: str) -> None:
-        """Wait (live: up to ARRIVE_TIMEOUT) until ``arm`` reads back ``target``; else fault."""
+    def _arrive(self, arm: Arm, target: dict[str, float], phase: str, strict: bool = True) -> None:
+        """Wait (live: up to ARRIVE_TIMEOUT) until ``arm`` reads back ``target``; else fault, or (not
+        ``strict``: the lift / retract) carry on, since it is as high as it will get."""
         give_up = time.monotonic() + (ARRIVE_TIMEOUT if self.live else 0.0)
         while True:
             actual = arm.read_joints()
@@ -463,6 +480,9 @@ class Executor:
             if not off:
                 return
             if time.monotonic() >= give_up:
+                if not strict:
+                    log.warning("%s: %s settled %s deg off; moving on", arm.arm_id, phase, off)
+                    return
                 raise ExecutionFault(f"{arm.arm_id} did not reach the pose before {phase} "
                                      f"(off by deg: {off}); the gripper was NOT moved")
             time.sleep(0.05)
