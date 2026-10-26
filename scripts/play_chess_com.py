@@ -1,4 +1,4 @@
-"""Live game loop: chess.com opponent ↔ robot arms ↔ human on the physical board.
+"""Live game loop: chess.com opponent <-> robot arms <-> human on the physical board.
 
 The chess.com Next.js app (chess_com/magnus_bot) runs a Steel browser session.  The opponent on
 chess.com plays White (its moves are detected by the monitor endpoint).  The robot arms replicate
@@ -10,8 +10,8 @@ endpoint.
   live:  python scripts/play_chess_com.py --session-id <steel-session-id> --live --arms follower_1,follower_2
 
 Flow (each full turn):
-  1. Chess.com (White) makes a move → monitor detects it → robot arms execute it on the board.
-  2. Human (Black) plays their reply on the board → camera detects it → sent to chess.com.
+  1. Chess.com (White) makes a move -> monitor detects it -> robot arms execute it on the board.
+  2. Human (Black) plays their reply on the board -> camera detects it -> sent to chess.com.
   3. Repeat until game over.
 
 Uses the same sim-first safety (rule 4) as play_moves.py: every robot move is planned in sim
@@ -51,18 +51,17 @@ from magnus_bot.planning.move_decomposer import PAD, STASH
 from magnus_bot.sources.chess_com_source import ChessComSource
 from magnus_bot.vision.observation import DEFAULT_VISION_URL, HttpBoardReader, VisionUnavailable
 from magnus_bot.vision.verify import (
-    Outcome,
     check_transfer,
     expected_occupancy,
     neighborhood,
     restrict,
 )
+from play_moves import GRACE, wait_for_any_move, wait_for_robot_move
 
 ROOT = Path(__file__).resolve().parents[1]
 HOVER = 0.10  # lift / travel height (m)
 DEFAULT_LIVE_ARMS = "follower_1"
-HUMAN_TIMEOUT = 300.0  # s to wait for camera to see the human's move
-HUMAN_POLL = 1.0  # s between board checks
+HUMAN_TIMEOUT = 0.0  # s to wait for the human's move; 0: as long as they think
 CHESSCOM_POLL = 1.0  # s between chess.com monitor polls
 CHESSCOM_TIMEOUT = 600.0  # s to wait for chess.com opponent
 
@@ -93,37 +92,6 @@ def grade(before: chess.Board, move: chess.Move, observed, also: set[str] = froz
     return check_transfer(restrict(was, zone), restrict(want, zone), restrict(observed, zone))
 
 
-def wait_for_human(reader, board: chess.Board, timeout: float, vision_timeout: float):
-    """Watch the board until the camera sees any legal Black move.
-
-    Returns ``(move, check)`` where ``move`` is the detected :class:`chess.Move`, or
-    ``(None, last_check)`` on timeout.
-    """
-    print("YOUR MOVE: play on the board; the camera is watching...")
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        try:
-            obs = reader.read(fresh=True, timeout=vision_timeout)
-        except VisionUnavailable:
-            time.sleep(HUMAN_POLL)
-            continue
-        # Try every legal move and see if the board matches any of them.
-        for move in board.legal_moves:
-            check = grade(board, move, obs.occupancy)
-            if check.outcome is Outcome.SUCCESS:
-                # Confirm with a second read to avoid transient detections.
-                time.sleep(HUMAN_POLL)
-                try:
-                    obs2 = reader.read(fresh=True, timeout=vision_timeout)
-                except VisionUnavailable:
-                    break
-                check2 = grade(board, move, obs2.occupancy)
-                if check2.outcome is Outcome.SUCCESS:
-                    return move, check2
-        time.sleep(HUMAN_POLL)
-    return None, None
-
-
 def sim_pass_move(board, move, sim_executor, rmap, config):
     """Sim-plan a single move.  Returns ``(program, trajectories)`` or raises."""
     program = build_move_program(board, move, rmap, config)
@@ -133,14 +101,17 @@ def sim_pass_move(board, move, sim_executor, rmap, config):
 
 
 def main(argv: list[str] | None = None, prompt=input) -> int:
-    parser = argparse.ArgumentParser(description="Live chess.com ↔ robot arm game loop.")
+    parser = argparse.ArgumentParser(description="Live chess.com <-> robot arm game loop.")
     parser.add_argument("--session-id", required=True, help="Steel browser session ID")
     parser.add_argument("--base-url", default="http://localhost:3000", help="Next.js app URL")
     parser.add_argument("--fen", default=chess.STARTING_FEN, help="starting position on the board")
     parser.add_argument("--live", action="store_true", help="drive real arms (gated)")
     parser.add_argument("--arms", default=None,
                         help="arms allowed to move live, comma-separated (default: both)")
-    parser.add_argument("--human-timeout", type=float, default=HUMAN_TIMEOUT)
+    parser.add_argument("--human-timeout", type=float, default=HUMAN_TIMEOUT,
+                        help="seconds to wait for each of your moves (0: no limit)")
+    parser.add_argument("--grace", type=float, default=GRACE,
+                        help="seconds an illegal / unexplained board may stay uncorrected")
     parser.add_argument("--chesscom-timeout", type=float, default=CHESSCOM_TIMEOUT)
     parser.add_argument("--vision-url", default=DEFAULT_VISION_URL)
     parser.add_argument("--vision-timeout", type=float, default=10.0)
@@ -162,7 +133,7 @@ def main(argv: list[str] | None = None, prompt=input) -> int:
     stops = {a: st for a in config.arms.arms
              if (st := servo_stops(config.arms.arms[a].calibration_id)) is not None}
 
-    # Chess.com source — polls the monitor for opponent (White) moves
+    # Chess.com source: polls the monitor for opponent (White) moves
     chesscom = ChessComSource(
         session_id=args.session_id,
         base_url=args.base_url,
@@ -208,7 +179,7 @@ def main(argv: list[str] | None = None, prompt=input) -> int:
                     board.push(move)
                 else:
                     # Human's turn: skip in sim, just wait for chess.com to reflect it
-                    print("Human's turn (Black) — skipping in sim, waiting for next White move...")
+                    print("Human's turn (Black): skipping in sim, waiting for next White move...")
                     # The monitor only fires on White moves, so we need to infer Black's move
                     # from the next monitor cycle.  For sim we just wait.
                     print("  (in sim mode, enter the human's UCI move to continue)")
@@ -274,6 +245,7 @@ def main(argv: list[str] | None = None, prompt=input) -> int:
                                         limits=smaps[a].servo_limits(kin.model.limits), kinematics=kin,
                                         tuned_grasps=True, stops={a: stops[a]} if a in stops else None)
 
+            baseline = None  # what the camera saw after the last robot move (misreads included)
             while not board.is_game_over():
                 if board.turn == robot:
                     # ---- Robot's turn: get move from chess.com, execute on physical board ----
@@ -316,31 +288,34 @@ def main(argv: list[str] | None = None, prompt=input) -> int:
 
                     # Grade with camera
                     via_pad = any(PAD in (s.transfer.src.kind, s.transfer.dst.kind) for s in program)
-                    seen = reader.read(fresh=True, timeout=args.vision_timeout).occupancy
-                    check = grade(board, move, seen, also={pad} if via_pad and pad else set())
+                    ok, baseline = wait_for_robot_move(reader, board, move,
+                                                       {pad} if via_pad and pad else set(),
+                                                       args.vision_timeout, args.grace)
                     log({"event": "robot_move", "time": started, "uci": move.uci(), "san": san,
-                         "grasp": grasps, "outcome": check.outcome.value, "detail": check.describe(),
-                         "duration_s": round(time.time() - started, 1)})
-                    print(f"{move.uci()} ({san}): {check.describe()}")
-                    if check.outcome is not Outcome.SUCCESS:
-                        print("stopped: fix the board, then restart", file=sys.stderr)
+                         "grasp": grasps, "ok": ok, "duration_s": round(time.time() - started, 1)})
+                    if not ok:
+                        print(f"stopped: the board did not show {move.uci()} within {args.grace:g} s",
+                              file=sys.stderr)
                         code = 2
                         break
+                    print(f"{move.uci()} ({san}): on the board")
                     board.push(move)
 
                 else:
                     # ---- Human's turn: watch physical board, send to chess.com ----
                     print("\nYour turn (Black). Play on the board...")
                     started = time.time()
-                    move, check = wait_for_human(reader, board, args.human_timeout, args.vision_timeout)
+                    move = wait_for_any_move(reader, board, args.human_timeout, args.vision_timeout,
+                                             baseline=baseline, grace=args.grace)
+                    baseline = None
                     if move is None:
-                        print("stopped: camera did not detect a move in time", file=sys.stderr)
+                        print("stopped: no legal move on the board", file=sys.stderr)
                         log({"event": "human_timeout", "time": started,
                              "waited_s": round(time.time() - started, 1)})
                         code = 2
                         break
                     san = board.san(move)
-                    print(f"Detected: {move.uci()} ({san}) — sending to chess.com...")
+                    print(f"Detected: {move.uci()} ({san}): sending to chess.com...")
 
                     # Send human's move to chess.com
                     try:

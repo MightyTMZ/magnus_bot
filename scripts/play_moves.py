@@ -13,7 +13,9 @@ hold (board.yaml gripper_closed_pct).
   demo:  <lerobot-venv>/python scripts/play_moves.py --live --game scholars-mate
 
 Saved games (--game, both arms by default): the camera watches for each of the human's moves and
-the arms reply as soon as it sees one (no key presses). See GAMES.
+the arms reply as soon as it sees one (no key presses). See GAMES. While it waits, N is the "next"
+button: the human passes (their move is skipped, nothing on the board changes) and the arms play the
+next robot move, re-planned in sim on the real board first.
 
 Handoffs (neither arm reaches both squares) go through the pad, a board square both arms reach
 (configs/handoff.yaml: e3): arm A sets the piece down there, arm B picks it up. Captures first
@@ -22,8 +24,9 @@ take the victim to the capturing arm's bin, a spot on the table just off the boa
 The whole sequence is planned and run in sim first (safety rule 4); live only starts if that
 passes. Live needs board.yaml `measured: true`, RF-DETR/vision_server.py running, the real board
 matching --fen, every arm a move needs in --arms, and a typed "yes". After each move the camera
-grades the squares near it (success / not_picked / lost / misplaced / disturbed / unclear);
-anything but success stops the run with the arms holding. Promotions are refused live (no stash).
+checks the squares it changes: a piece missing, or one where none should be, is only a warning
+while the operator fixes the board by hand; the run stops (arms holding) once it has stayed wrong
+for --grace s (60). Promotions are refused live (no stash).
 """
 
 from __future__ import annotations
@@ -58,6 +61,7 @@ from magnus_bot.planning.assigner import Unassignable
 from magnus_bot.planning.move_decomposer import PAD, STASH
 from magnus_bot.vision.observation import DEFAULT_VISION_URL, HttpBoardReader, VisionUnavailable
 from magnus_bot.vision.verify import (
+    UNKNOWN,
     Outcome,
     check_transfer,
     expected_occupancy,
@@ -70,9 +74,24 @@ HOVER = 0.10  # lift / travel height (m), as tune_grasp.py
 DEFAULT_LIVE_ARMS = "follower_1"
 HUMAN_TIMEOUT = 300.0  # s to wait for the camera to see the human's move
 HUMAN_POLL = 1.0  # s between looks at the board while waiting
+GRACE = 60.0  # s the board may stay wrong after a robot move (warnings meanwhile) before the game stops
 GAMES = {  # name -> the whole game (both sides), UCI
     "scholars-mate": "e2e4,e7e5,f1c4,b8c6,d1h5,g8f6,h5f7",  # 1.e4 e5 2.Bc4 Nc6 3.Qh5 Nf6 4.Qxf7#
 }
+PASSED = object()  # wait_for_human: the operator pressed N (next), the human passes
+
+
+def next_pressed() -> bool:
+    """True if N (the "next" button) was pressed since the last look; other keys are dropped.
+    Windows console only (as keyboard_jog.py); elsewhere there is no button."""
+    try:
+        import msvcrt
+    except ImportError:
+        return False
+    hit = False
+    while msvcrt.kbhit():
+        hit |= msvcrt.getwch().lower() == "n"
+    return hit
 
 
 @dataclasses.dataclass(frozen=True)
@@ -129,13 +148,109 @@ def grade(before: chess.Board, move: chess.Move, observed, also: set[str] = froz
     return check_transfer(restrict(was, zone), restrict(want, zone), restrict(observed, zone))
 
 
-def wait_for_human(reader, board: chess.Board, move: chess.Move, san: str, args):
+def mismatches(want, seen) -> set[str]:
+    return {s for s in set(want) | set(seen) if want.get(s) != seen.get(s)}
+
+
+def best_legal_move(board: chess.Board, seen) -> chess.Move | None:
+    """The legal move the observed board shows best, or None. The camera's misreads count the same
+    against every move and cancel out: the move must explain at least two more squares than "no
+    move yet" and beat every other move (a promotion is read as a queen)."""
+    base = len(mismatches(expected_occupancy(board), seen))
+    scored = []
+    for move in board.legal_moves:
+        after = board.copy(stack=False)
+        after.push(move)
+        scored.append((len(mismatches(expected_occupancy(after), seen)), move))
+    if not scored:
+        return None
+    best = min(d for d, _ in scored)
+    tied = [m for d, m in scored if d == best]
+    if base - best < 2 or len({(m.from_square, m.to_square) for m in tied}) != 1:
+        return None
+    return next((m for m in tied if m.promotion in (None, chess.QUEEN)), tied[0])
+
+
+def wait_for_any_move(reader, board: chess.Board, timeout: float, vision_timeout: float,
+                      baseline=None, grace: float = GRACE):
+    """Watch the board until the camera shows the same legal move on two looks in a row.
+
+    No hard refusals: a board no legal move explains (an illegal move, or the camera fuzzing) is
+    only a warning, and the game stops once it has lasted ``grace`` s uncorrected. ``baseline`` is
+    what the camera saw at the start of the turn (its steady misreads included); a board back to
+    it is "corrected". ``timeout`` 0 waits as long as the human thinks. Returns the move or None.
+    """
+    print("YOUR MOVE: play on the board; the camera is watching...")
+    deadline = time.monotonic() + timeout if timeout else None
+    last, odd_since = None, None
+    while deadline is None or time.monotonic() < deadline:
+        try:
+            seen = reader.read(fresh=True, timeout=vision_timeout).occupancy
+        except VisionUnavailable:  # no stable board yet (a hand over it): keep watching
+            time.sleep(HUMAN_POLL)
+            continue
+        if baseline is None:
+            baseline = seen
+        move = best_legal_move(board, seen)
+        if move is not None or seen == baseline:
+            odd_since = None
+        elif odd_since is None:
+            odd_since = time.monotonic()
+            print(f"  WARNING: the board shows no legal move "
+                  f"({', '.join(sorted(mismatches(baseline, seen)))} changed): fix it within {grace:g} s "
+                  "or the game stops", file=sys.stderr)
+        elif time.monotonic() - odd_since > grace:
+            print(f"  not corrected within {grace:g} s", file=sys.stderr)
+            return None
+        if move is not None and move == last:
+            return move
+        last = move
+        time.sleep(HUMAN_POLL)
+    return None
+
+
+def wait_for_robot_move(reader, before: chess.Board, move: chess.Move, also: set[str],
+                        vision_timeout: float, grace: float = GRACE):
+    """After the arms play ``move``: do the squares it changes (and ``also``, e.g. the pad) read
+    right? Misreads elsewhere are ignored. A wrong read (a piece missing, or one where none should
+    be) is only a warning; the game stops once the board has stayed wrong for ``grace`` s in a row,
+    so the operator can fix it by hand. Returns ``(ok, what the camera last saw)``."""
+    after = before.copy(stack=False)
+    after.push(move)
+    was, want = expected_occupancy(before), expected_occupancy(after)
+    squares = {s for s in set(was) | set(want) if was.get(s) != want.get(s)} | set(also)
+    since, warned, seen = time.monotonic(), None, None
+    while True:
+        try:
+            seen = reader.read(fresh=True, timeout=vision_timeout).occupancy
+            wrong = sorted(s for s in squares if want.get(s) != seen.get(s)
+                           and not (want.get(s) and seen.get(s) == UNKNOWN))
+        except VisionUnavailable:  # no stable board (a hand over it): still not seen
+            wrong = ["(no stable board)"]
+        if not wrong:
+            return True, seen
+        if time.monotonic() - since > grace:
+            print(f"  not corrected within {grace:g} s", file=sys.stderr)
+            return False, seen
+        if wrong != warned:
+            print(f"  WARNING: the board does not show {move.uci()} yet (check {', '.join(wrong)}): "
+                  f"fix it within {grace:g} s or the game stops", file=sys.stderr)
+            warned = wrong
+        time.sleep(HUMAN_POLL)
+
+
+def wait_for_human(reader, board: chess.Board, move: chess.Move, san: str, args, skip=lambda: False):
     """Watch the board until the camera sees ``move`` played (twice in a row, so a hand still over
-    the board does not count), or the timeout passes. The last check, or None if never read."""
-    print(f"YOUR MOVE: play {move.uci()} ({san}) on the board; the arms go as soon as the camera sees it")
+    the board does not count), or the timeout passes. The last check, or None if never read;
+    PASSED if ``skip()`` (the next button) fires first."""
+    print(f"YOUR MOVE: play {move.uci()} ({san}) on the board; the arms go as soon as the camera sees it "
+          "(N = next: pass, the arms play on)")
+    skip()  # drop a press made while the arms were still moving
     deadline = time.monotonic() + args.human_timeout
     check, seen = None, 0
     while time.monotonic() < deadline:
+        if skip():
+            return PASSED
         try:
             check = grade(board, move, reader.read(fresh=True, timeout=args.vision_timeout).occupancy)
         except VisionUnavailable:  # no stable board yet (a hand over it): keep watching
@@ -159,6 +274,8 @@ def main(argv: list[str] | None = None, prompt=input) -> int:
                              "arms with --game)")
     parser.add_argument("--human-timeout", type=float, default=HUMAN_TIMEOUT,
                         help="seconds to wait for the camera to see each of the human's moves")
+    parser.add_argument("--grace", type=float, default=GRACE,
+                        help="seconds the board may stay wrong after a robot move before the game stops")
     parser.add_argument("--vision-url", default=DEFAULT_VISION_URL)
     parser.add_argument("--vision-timeout", type=float, default=10.0)
     parser.add_argument("--log", type=Path, default=None)
@@ -259,8 +376,9 @@ def main(argv: list[str] | None = None, prompt=input) -> int:
     log_path = args.log or ROOT / "hardware" / "tuning_logs" / f"play_{stamp}.jsonl"
     used = sorted({a for _, arms_used in plans.values() for a in arms_used})
     print(f"\nLIVE: {' + '.join(used)} play {', '.join(t.move.uci() for t in turns if t.robot)}; you "
-          f"play {', '.join(t.move.uci() for t in turns if not t.robot) or 'nothing'}. Each move is "
-          f"graded; anything but success stops with the arms holding.\nlog: {log_path}\n"
+          f"play {', '.join(t.move.uci() for t in turns if not t.robot) or 'nothing'}. After each "
+          f"move a wrong board is a warning; {args.grace:g} s uncorrected stops with the arms "
+          f"holding.\nlog: {log_path}\n"
           "Ctrl+C holds the arms. Keep a hand near the power.")
     if prompt("Type 'yes' to start: ").strip().lower() != "yes":
         print("aborted")
@@ -284,13 +402,26 @@ def main(argv: list[str] | None = None, prompt=input) -> int:
                 executors[a] = Executor(config, {a: arm}, rmap, live=True, to_command=smaps[a].model_to_servo,
                                         limits=smaps[a].servo_limits(kin.model.limits), kinematics=kin,
                                         tuned_grasps=True, stops={a: stops[a]} if a in stops else None)
+            passed = False  # the human pressed next: the board is no longer the one sim planned on
             for turn in turns:
-                if turn.move not in board.legal_moves:
+                if turn.move not in board.legal_moves and board.turn != robot:
                     board.push(chess.Move.null())  # the human passes
+                if turn.move not in board.legal_moves:
+                    print(f"stopped: {turn.move.uci()} is not legal after the pass ({board.fen()})",
+                          file=sys.stderr)
+                    code = 2
+                    break
                 san = board.san(turn.move)
                 started = time.time()
                 if not turn.robot:
-                    check = wait_for_human(reader, board, turn.move, san, args)
+                    check = wait_for_human(reader, board, turn.move, san, args, skip=next_pressed)
+                    if check is PASSED:
+                        log({"event": "human", "time": started, "uci": turn.move.uci(), "san": san,
+                             "outcome": "passed", "waited_s": round(time.time() - started, 1)})
+                        print(f"{turn.move.uci()} ({san}): passed (next)")
+                        board.push(chess.Move.null())
+                        passed = True
+                        continue
                     log({"event": "human", "time": started, "uci": turn.move.uci(), "san": san,
                          "outcome": None if check is None else check.outcome.value,
                          "waited_s": round(time.time() - started, 1)})
@@ -303,21 +434,25 @@ def main(argv: list[str] | None = None, prompt=input) -> int:
                     board.push(turn.move)
                     continue
                 program = build_move_program(board, turn.move, rmap, config)
+                if passed:  # safety rule 4: sim this plan on the real board before the arms run it
+                    sim.run(sim.plan(program))
                 grasps = []
                 for leg in program:  # a handoff is two legs, each by its own arm, one after the other
                     trajectories = executors[leg.arm_id].plan([leg])
                     executors[leg.arm_id].run(trajectories)
                     grasps += [f"{t.arm_id} {t.transfer.reason}: {t.grasp}" for t in trajectories]
                 via_pad = any(PAD in (s.transfer.src.kind, s.transfer.dst.kind) for s in program)
-                seen = reader.read(fresh=True, timeout=args.vision_timeout).occupancy
-                check = grade(board, turn.move, seen, also={pad} if via_pad and pad else set())
+                also = {pad} if via_pad and pad else set()
+                ok, seen = wait_for_robot_move(reader, board, turn.move, also, args.vision_timeout,
+                                               args.grace)
+                check = grade(board, turn.move, seen, also=also) if seen is not None else None
                 log({"event": "move", "time": started, "uci": turn.move.uci(), "san": san, "grasp": grasps,
-                     "outcome": check.outcome.value, "detail": check.describe(),
+                     "ok": ok, "outcome": check and check.outcome.value, "detail": check and check.describe(),
                      "duration_s": round(time.time() - started, 1)})
-                print(f"{turn.move.uci()} ({san}): {check.describe()}")
-                if check.outcome is not Outcome.SUCCESS:
-                    print("stopped: fix the board, then rerun from the position on the board (--fen)",
-                          file=sys.stderr)
+                print(f"{turn.move.uci()} ({san}): {check.describe() if check else 'no stable board'}")
+                if not ok:
+                    print(f"stopped: the board did not show {turn.move.uci()} within {args.grace:g} s; fix "
+                          "it, then rerun from the position on the board (--fen)", file=sys.stderr)
                     code = 2
                     break
                 board.push(turn.move)

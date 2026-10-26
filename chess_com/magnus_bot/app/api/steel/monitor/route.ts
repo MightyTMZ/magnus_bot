@@ -6,7 +6,8 @@ import path from "path";
 
 const anthropic = new Anthropic();
 
-// In-memory store for the previous screenshot (per session)
+// In-memory store for the previous screenshot, per session AND per consumer: the page and the
+// arm loop (consumer "arms") both poll, and with one shared baseline whichever polls first eats the move.
 const previousScreenshots = new Map<string, Buffer>();
 
 /**
@@ -42,7 +43,8 @@ Rules:
 Respond with ONLY the UCI move string, or an empty string if no new White move was detected. No explanation, no punctuation, no formatting — just the move or nothing.`;
 
 export async function POST(request: Request) {
-  const { sessionId } = await request.json();
+  const { sessionId, consumer } = await request.json();
+  const key = `${sessionId}:${consumer ?? "page"}`;
   const apiKey = process.env.STEEL_API_KEY;
 
   if (!sessionId) {
@@ -66,12 +68,12 @@ export async function POST(request: Request) {
 
     // Take current screenshot
     const currentBuffer = await page.screenshot({ type: "png", fullPage: false });
-    const previousBuffer = previousScreenshots.get(sessionId);
+    const previousBuffer = previousScreenshots.get(key);
 
     // Store current as the new "previous" for next poll
-    previousScreenshots.set(sessionId, currentBuffer);
+    previousScreenshots.set(key, currentBuffer);
 
-    // First call — no previous screenshot to compare against
+    // First call: no previous screenshot to compare against
     if (!previousBuffer) {
       return NextResponse.json({ move: "", reason: "first_screenshot" });
     }
@@ -92,7 +94,7 @@ export async function POST(request: Request) {
     // await writeFile(path.join(debugDir, `monitor-${ts}-before.png`), previousBuffer);
     // await writeFile(path.join(debugDir, `monitor-${ts}-after.png`), currentBuffer);
 
-    // Screenshots differ — ask Claude Vision to detect the move
+    // Screenshots differ: ask Claude Vision to detect the move
     const beforeBase64 = previousBuffer.toString("base64");
     const afterBase64 = currentBuffer.toString("base64");
 
@@ -137,7 +139,7 @@ export async function POST(request: Request) {
     } else if (rawText) {
       console.log(`[monitor] Vision returned non-move text: "${rawText}"`);
     } else {
-      console.log(`[monitor] Vision returned empty — no move detected`);
+      console.log(`[monitor] Vision returned empty: no move detected`);
     }
 
     return NextResponse.json({ move, diffRatio });

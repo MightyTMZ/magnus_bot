@@ -5,7 +5,7 @@ vertical plane through that yaw; the wrist is driven so the tool points straight
 top-down grasp; ``wrist_roll`` orients the jaws. A numeric solver (placo/ikpy, the ``ik`` extra)
 is only ever a cross-check (see tests/test_ik.py), never the control path.
 
-CONVENTION: this module works in an internal *model* convention — angles measured from +z (up),
+CONVENTION: this module works in an internal *model* convention: angles measured from +z (up),
 in radians, in the arm frame A_i (origin on the base yaw axis, +x forward, +y left, +z up). The
 shoulder_lift / elbow_flex / wrist_flex axes are parallel (verified from the URDF), so the arm is
 a yaw plus a planar 3-link (upper_arm, forearm, wrist_to_tip). :mod:`kinematics.conventions`

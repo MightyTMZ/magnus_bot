@@ -1,6 +1,6 @@
 """The first real single-arm move: follower_1 picks a rook off g3 and places it on g4.
 
-Scope (deliberately minimal): one arm, one piece, one adjacent square — no handoff, no tilt, no
+Scope (deliberately minimal): one arm, one piece, one adjacent square; no handoff, no tilt, no
 other pieces in the way. A LOW hover (6 cm) is used, not the rig's 14 cm z_clear: top-down cannot
 hover at 14 cm (the REACH issue, pending the tilt work), and an adjacent move over an empty square
 only needs to clear the 4.5 cm rook. Grasp height is the rook's measured value (fingertip 5 mm, so
@@ -8,7 +8,7 @@ the pad centre lands on the 28 mm neck).
 
 Modes:
   --sim  (default) : run on SimArm, no hardware. The safety-rule-4 sim pass. Safe anywhere.
-  --live           : drive follower_1 for real. GATED — needs board.yaml `measured: true`, the
+  --live           : drive follower_1 for real. GATED: needs board.yaml `measured: true`, the
                      --live flag, follower_1's servo map, and an operator present. Start the arm
                      from a safe pose near the board first (NOT the folded rest), and watch it.
 

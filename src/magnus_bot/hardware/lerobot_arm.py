@@ -7,7 +7,7 @@ through as percent.
 
 ``lerobot`` is imported lazily inside :meth:`connect`, so the core package never requires it.
 The wiring mirrors the proven arm_test harness (max_relative_target clamp, .pos observation
-keys), but it is NOT yet validated end-to-end — hence a stub. Live motion stays gated by the
+keys), but it is NOT yet validated end-to-end, hence a stub. Live motion stays gated by the
 executor/CLI (``--live`` + approval + ``measured: true``); constructing this class does nothing
 to hardware.
 """

@@ -18,7 +18,7 @@ motion. After running, RECALIBRATE (the old calibration is bound to the wrong ID
 `gripper_read.py --all` to confirm every joint now reports its matching name.
 
 SAFETY: dry-run by default (prints the plan + a ping scan). Pass --run to actually write. If it
-fails part-way, a servo may be left at id 7 — re-scan with --dry-run (default) to see the state;
+fails part-way, a servo may be left at id 7; re-scan with --dry-run (default) to see the state;
 recovery is to finish the remaining moves by hand or fall back to `lerobot-setup-motors`.
 
 Run from the lerobot env:
@@ -74,7 +74,7 @@ def main(argv: list[str] | None = None) -> int:
 
         final = sorted(i for i in range(1, 7) if bus.ping(i) is not None)
         ok = final == sorted(EXPECTED_START)
-        print(f"\nIDs now answering: {final}  ({'OK' if ok else 'UNEXPECTED — investigate'})")
+        print(f"\nIDs now answering: {final}  ({'OK' if ok else 'UNEXPECTED, investigate'})")
         print("Next: recalibrate (lerobot-calibrate ... --robot.id=follower_1), then gripper_read.py --all.")
         return 0 if ok else 1
     finally:

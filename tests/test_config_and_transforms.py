@@ -10,9 +10,8 @@ from magnus_bot.geometry.transforms import Pose2D, perp_left
 from magnus_bot.motion.trajectory import min_jerk_interp, min_jerk_scalar
 
 
-def test_packaged_config_loads_unmeasured():
+def test_packaged_config_loads():
     config = load_config()
-    assert config.measured is False
     assert config.board.human_color == "black"
     assert config.board.robot_color == "white"
     assert set(config.arms.arms) == {"follower_1", "follower_2"}

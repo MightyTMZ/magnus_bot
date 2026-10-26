@@ -5,9 +5,8 @@ Keep it under ~200 lines by summarizing old entries. Never delete decisions — 
 
 ## Status
 Milestone **M0 (scaffold + tests green)**: COMPLETE. No hardware has been driven by magnus_bot
-code yet. **209 tests pass, 1 skip** (placo cross-check, needs the `ik` env; a working copy with
-`measured: true` also fails `test_packaged_config_loads_unmeasured` — expected); ruff clean on
-`src/ tests/ scripts/` (the teammates' `RF-DETR/` scripts still have lint findings).
+code yet. **268 tests pass, 1 skip** (placo cross-check, needs the `ik` env); ruff clean on the
+whole repo (2026-10-26). `configs/board.yaml` is committed with `measured: true` (2026-10-26).
 **M1 Phase 0 (2026-10-24):** 0a env built (lerobot + serial-motors + magnus_bot[hardware] in
 `C:\projects\lerobot\.venv`). 0b done (URDF link lengths in `SO101Model`; nominal limits in
 docs/joint_conventions.md). 0c partial: recorded square 0.057, gap 0.067, z_grasp 0.028 (pawn),
@@ -195,6 +194,34 @@ base 0.078 + the arm falling 33 mm short (`arms.reach_correction`) + 2 mm right 
   e3 pad (bishop on follower_2 confirmed e3<->c4), Qh5 via e3 (queen h5 override: aim 6 mm to the
   arm's left), Qxf7 (f7 pawn to the bin fine). New `arms.square_nudge_mm` (per arm, per square
   [reach, side] mm at that square only): follower_1 f7 [4, -4] (the queen landed short-left).
+  **Next button (2026-10-25):** while it waits for Black, pressing N (Windows console, msvcrt)
+  passes Black's move (null move, logged `outcome: passed`) and the arms play the next White move;
+  after a pass every robot move is re-simmed on the real board before it runs (rule 4). A key
+  pressed while the arms move is dropped. Not yet run live.
+
+- **chess.com bridge check (2026-10-25, read-only):** both arms answer on COM3/COM4 (all 12
+  servos, ~12.2 V, torque off). `scripts/play_chess_com.py` sim against a fake monitor: Scholar's
+  mate plans end to end (pad handoffs + capture). NOT yet run against a real Steel session.
+  FIXED same day: the monitor keeps a baseline per consumer (the arm loop sends
+  `consumer: "arms"`, so the page's own polling no longer eats its moves), and `prime()` keeps a
+  fast reply for `next_move`. Still open: play-move clicks are not verified;
+  monitor errors look like "no move"; Steel sessions expire after 15 min; the human must be Black
+  on chess.com; no promotion click; session id only in the page's localStorage.
+  **play_chess_com.py lenient mode (operator, 2026-10-25: CV fuzz was ending games):** the human's
+  move = the legal move that best explains the camera's board (>= 2 squares better than "no move",
+  unique, same on 2 looks; steady misreads cancel out). A robot move only checks the squares it
+  changes. A board no legal move explains, or a robot move not on the board, gets `--grace` 30 s
+  to be fixed by hand, then the game stops. No human think-time limit (`--human-timeout 0`).
+  Stockfish 19 installed (winget); `scripts/play_stockfish.py` (engine plays White with the arms,
+  camera reads any legal human move, falls back to the engine's next-best move the arms can
+  plan) is UNPAUSED, sim-clean with the real engine, tests in tests/test_play_stockfish_script.py,
+  ruff clean. Human moves now use the shared `play_moves.wait_for_any_move` (steady misreads cancel
+  out; odd board = warning, 60 s = stop; no time limit to think). NOT yet run live. The king has no
+  tuned grasp, so the robot never moves its king or castles (a check only the king can answer stops).
+- **Camera guardrail softened (2026-10-25):** a wrong board after a robot move (piece missing,
+  or one where none should be) is now a WARNING in play_moves / play_stockfish / play_chess_com;
+  the game stops only once it stays wrong 60 s in a row (`--grace`, shared
+  `play_moves.wait_for_robot_move`). The chess.com human-turn "no legal move" grace is also 60 s.
 
 ## Earlier session (2026-10-24, Alex + Claude, part 2) — reach probe, geometry calibrated
 - **Why:** after the live tuning run missed every time, the camera could only say "not picked".
@@ -385,11 +412,8 @@ base 0.078 + the arm falling 33 mm short (`arms.reach_correction`) + 2 mm right 
 ## Open questions (for the operator / team)
 - Done 2026-10-24: square 0.057, gap 0.067, z_grasp 0.028 (pawn), king 0.099, z_clear 0.140;
   servo-ID issue resolved (see Known issues).
-- STILL NEEDED to flip `measured: true` (record with `gripper_read.py` on each piece):
-  - `gripper_open` (single %)  ->  configs/arms.yaml: `gripper_open`
-  - `gripper_closed` PER PIECE (they differ by base diameter)  ->  configs/board.yaml:
-    `gripper_closed_pct` (pawn/knight/bishop/rook/queen/king)
-  - remaining piece heights + base diameters (only king measured so far) -> configs/board.yaml
+- Done 2026-10-25: `gripper_open`, every per-piece `gripper_closed_pct` and all piece dims are
+  measured; `measured: true` is committed.
 - REACH: tilted-tool IK, base risers, lower/per-move traverse height, or a smaller board? (Data
   in Known issues: REACH.) Also: how to avoid knocking neighbours over with a tilted approach.
 - Product goal: robots vs. human with Stockfish (current CLAUDE.md), or a human playing
@@ -519,7 +543,7 @@ TWO separate environments — the core never imports lerobot (keeps sim/tests po
 
 ## Command cheatsheet
 - Tests: `.venv/Scripts/python -m pytest` (Windows) · `.venv/bin/python -m pytest` (macOS/Linux)
-- Lint: `<venv python> -m ruff check src tests scripts`
+- Lint: `<venv python> -m ruff check .`
 - Sim: `magnus-bot info` · `magnus-bot demo-move --uci e2e4`
 - Dry-run a move program: `python scripts/demo_single_move.py --uci e2e4`
 - Sim-execute a move: `Executor(..., simulate=True)` with a feasible `z_clear` (see tests/test_executor.py `_low_clear`)
@@ -530,3 +554,6 @@ TWO separate environments — the core never imports lerobot (keeps sim/tests po
 - Grasp tuning: sim dry run `python scripts/tune_grasp.py --search --sim-good-pitch 27,34` · live
   `--live --search --pitch-range 20,40 --save` (lerobot venv, vision server running, type "yes") ·
   fixed grid instead: `--pitches 25,30,35 [--z-offsets 0,5]`.
+- Games (sim by default; `--live` from the lerobot venv with the vision server up): saved game
+  `scripts/play_moves.py --game scholars-mate` · vs Stockfish `scripts/play_stockfish.py --elo 1500`
+  · chess.com bridge `scripts/play_chess_com.py --session-id <id>` (needs `chess_com/` on :3000).

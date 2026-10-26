@@ -74,7 +74,7 @@ export async function POST(request: Request) {
 
     const response = await anthropic.messages.create({
       model: "claude-sonnet-4-6",
-      max_tokens: 100,
+      max_tokens: 200,
       messages: [
         {
           role: "user",
@@ -93,14 +93,18 @@ export async function POST(request: Request) {
       ],
     });
 
-    const rawText =
-      response.content[0].type === "text" ? response.content[0].text.trim() : "";
+    const block = response.content.find((b) => b.type === "text");
+    const rawText = block?.type === "text" ? block.text.trim() : "";
 
-    // Parse coordinates
+    // Parse coordinates. The model sometimes wraps the JSON in a ```json fence or adds a
+    // sentence around it, so pull out the outermost {...} instead of parsing the raw text.
     let coords: { src: { x: number; y: number }; dst: { x: number; y: number } };
     try {
-      coords = JSON.parse(rawText);
+      const start = rawText.indexOf("{");
+      const end = rawText.lastIndexOf("}");
+      coords = JSON.parse(rawText.slice(start, end + 1));
     } catch {
+      console.error(`[play-move] ${move}: unparseable vision reply:`, rawText);
       return NextResponse.json(
         { error: "Failed to parse coordinates from vision model", raw: rawText },
         { status: 500 }
@@ -114,6 +118,7 @@ export async function POST(request: Request) {
       coords.src.x < 0 || coords.src.y < 0 ||
       coords.dst.x < 0 || coords.dst.y < 0
     ) {
+      console.error(`[play-move] ${move}: invalid coordinates:`, rawText);
       return NextResponse.json(
         { error: "Invalid coordinates from vision model", coords },
         { status: 500 }
@@ -137,7 +142,7 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error("Play move error:", error);
     return NextResponse.json(
-      { error: "Failed to play move" },
+      { error: "Failed to play move", detail: String(error) },
       { status: 500 }
     );
   } finally {

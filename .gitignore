@@ -29,7 +29,7 @@ htmlcov/
 Thumbs.db
 
 # Claude Code local settings (machine-specific)
-.claude/settings.local.json
+**/.claude/settings.local.json
 
 # Runtime data / logs (never commit captured runs)
 *.log

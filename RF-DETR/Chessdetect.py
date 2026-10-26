@@ -8,10 +8,9 @@ import chess
 import cv2
 import numpy as np
 import supervision as sv
-from rfdetr import RFDETRSmall
-
-from board import build_board, draw_grid, draw_points, load_homography, prep_frame, CORNERS_PATH
+from board import CORNERS_PATH, build_board, draw_grid, draw_points, load_homography, prep_frame
 from moves import find_move, is_rook_sacrifice
+from rfdetr import RFDETRSmall
 
 CLIP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "RookSacrifice.mp4")
 # Spoken line in RookSacrifice.mp4. Playback reads that file and does not write another.
@@ -186,7 +185,8 @@ while True:
         xs = [c[0] for c in saved_corners]
         ys = [c[1] for c in saved_corners]
         if max(xs) >= w or max(ys) >= h or max(xs) < w * 0.5 or max(ys) < h * 0.5:
-            print("corners.json does not match this frame. Run Calibrate.py and click the four corners again.")
+            print("corners.json does not match this frame. "
+                  "Run Calibrate.py and click the four corners again.")
         checked_frame = True
 
     now = time.time()

@@ -1,5 +1,6 @@
 import chess
 
+
 def expected_occupancy(chess_board):
     occupancy = {}
 

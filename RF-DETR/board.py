@@ -1,6 +1,7 @@
-import cv2
 import json
 import os
+
+import cv2
 import numpy as np
 
 BOARD_SIZE = 800
@@ -111,7 +112,7 @@ def build_pieces(detections, H):
     pieces = {}
     best = {}
     confidences = detections.confidence
-    for i, (box, name) in enumerate(zip(detections.xyxy, detections.data["class_name"])):
+    for i, (box, name) in enumerate(zip(detections.xyxy, detections.data["class_name"], strict=False)):
         square = box_to_square(box, H)
         if square is None:
             continue
@@ -135,9 +136,9 @@ def print_board(board):
                 row.append(board[square])
             else:
                 row.append(".")
-        print(f"{rank}  " + " ".join(row))   # ← rank number at the start
-    print("   a b c d e f g h")              # ← file letters at the bottom
-    print()                                  # ← blank line between prints
+        print(f"{rank}  " + " ".join(row))
+    print("   a b c d e f g h")
+    print()
 def draw_grid(frame, H):
     """Draw the 8x8 board grid onto the camera image to check calibration."""
     H_inv = np.linalg.inv(H)
@@ -162,7 +163,7 @@ def draw_grid(frame, H):
 
 def draw_points(frame, detections, H):
     """Draw the point used for each piece, colored by color, with its square name."""
-    for box, name in zip(detections.xyxy, detections.data["class_name"]):
+    for box, name in zip(detections.xyxy, detections.data["class_name"], strict=False):
         x, y, square = piece_point(box, H)
         dot = (255, 255, 255) if name.startswith("white") else (0, 0, 255)
         cv2.circle(frame, (int(x), int(y)), 5, dot, -1)

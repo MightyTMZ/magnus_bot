@@ -1,4 +1,4 @@
-"""Live, read-only gripper position monitor — for reading gripper_open / gripper_closed by hand.
+"""Live, read-only gripper position monitor, for reading gripper_open / gripper_closed by hand.
 
 Prints ``gripper.pos`` (0..100 percent) continuously. Move the jaws by hand and read the value:
 fully open -> gripper_open; closed firmly on a pawn -> gripper_closed. Ctrl-C to stop.

@@ -130,3 +130,88 @@ def test_waiting_for_the_human_gives_up_after_the_timeout(play, monkeypatch):
     args = types.SimpleNamespace(human_timeout=0.05, vision_timeout=1.0)
     check = play.wait_for_human(reader, board, chess.Move.from_uci("e7e5"), "e5", args)
     assert check is not None and check.outcome.value != "success"
+
+
+def test_the_next_button_passes_for_the_human(play, monkeypatch):
+    import types
+
+    import chess
+
+    from magnus_bot.vision.verify import expected_occupancy
+
+    monkeypatch.setattr(play, "HUMAN_POLL", 0.0)
+    board = chess.Board()
+    board.push_uci("e2e4")
+    reader = _Board([expected_occupancy(board)])  # nobody moves
+    args = types.SimpleNamespace(human_timeout=5.0, vision_timeout=1.0)
+    presses = iter([True, False, False, True])  # a stale press (dropped), two looks, then N
+    check = play.wait_for_human(reader, board, chess.Move.from_uci("e7e5"), "e5", args,
+                                skip=lambda: next(presses))
+    assert check is play.PASSED
+    assert next(presses, None) is None  # it passed on the fresh press, not the stale one
+
+
+def test_a_missing_piece_after_a_robot_move_only_warns_until_fixed(play, monkeypatch, capsys):
+    import chess
+
+    from magnus_bot.vision.verify import expected_occupancy
+
+    monkeypatch.setattr(play, "HUMAN_POLL", 0.0)
+    board = chess.Board()
+    move = chess.Move.from_uci("e2e4")
+    after = board.copy()
+    after.push(move)
+    done = expected_occupancy(after)
+    lost = {k: v for k, v in done.items() if k != "e4"}  # the pawn is nowhere to be seen
+    reader = _Board([lost, lost, done])
+    ok, seen = play.wait_for_robot_move(reader, board, move, set(), 1.0, grace=5.0)
+    assert ok and seen == done
+    err = capsys.readouterr().err
+    assert err.count("WARNING") == 1 and "check e4" in err  # warned once, the game went on
+
+
+def test_the_game_stops_once_the_board_stays_wrong_for_the_grace(play, monkeypatch, capsys):
+    import chess
+
+    from magnus_bot.vision.verify import expected_occupancy
+
+    monkeypatch.setattr(play, "HUMAN_POLL", 0.0)
+    board = chess.Board()
+    move = chess.Move.from_uci("e2e4")
+    reader = _Board([expected_occupancy(board)])  # the pawn never moved
+    ok, _ = play.wait_for_robot_move(reader, board, move, set(), 1.0, grace=0.05)
+    assert not ok
+    assert "not corrected within 0.05 s" in capsys.readouterr().err
+
+
+def test_any_legal_move_is_seen_through_a_steady_camera_misread(play, monkeypatch):
+    import chess
+
+    from magnus_bot.vision.verify import expected_occupancy
+
+    monkeypatch.setattr(play, "HUMAN_POLL", 0.0)
+    board = chess.Board()
+    board.push_uci("e2e4")
+    misread = dict(expected_occupancy(board), d4="W")  # the camera always sees a ghost on d4
+    after = board.copy()
+    after.push_uci("g8f6")
+    played = dict(expected_occupancy(after), d4="W")
+    reader = _Board([misread, played, played])
+    assert play.wait_for_any_move(reader, board, 5.0, 1.0).uci() == "g8f6"
+
+
+def test_a_board_no_legal_move_explains_warns_then_stops_after_the_grace(play, monkeypatch, capsys):
+    import chess
+
+    from magnus_bot.vision.verify import expected_occupancy
+
+    monkeypatch.setattr(play, "HUMAN_POLL", 0.0)
+    board = chess.Board()
+    board.push_uci("e2e4")
+    start = expected_occupancy(board)
+    knocked = {k: v for k, v in start.items() if k != "a8"}  # a rook vanished: no legal move
+    reader = _Board([start, knocked])
+    assert play.wait_for_any_move(reader, board, 0.0, 1.0, grace=0.05) is None
+    err = capsys.readouterr().err
+    assert "WARNING: the board shows no legal move (a8 changed)" in err
+    assert "not corrected within 0.05 s" in err

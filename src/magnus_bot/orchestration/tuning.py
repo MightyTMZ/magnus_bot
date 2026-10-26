@@ -16,7 +16,7 @@ the board reader is asked for a fresh, stable board, which :func:`check_transfer
 :func:`run_sweep` tries a fixed list of settings; :func:`refine_search` searches a tilt range
 (then optionally a grasp-height range) coarse to fine; :func:`best_setting` picks the most robust
 winner. Hardware stays outside: the caller's ``make_shuttle`` builds the thing that moves the piece
-for each :class:`Setting`. Motion faults are deliberately not caught —
+for each :class:`Setting`. Motion faults are deliberately not caught:
 :class:`~magnus_bot.orchestration.executor.ExecutionFault` propagates with the arms holding, and
 so does :class:`~magnus_bot.vision.observation.VisionUnavailable`.
 """

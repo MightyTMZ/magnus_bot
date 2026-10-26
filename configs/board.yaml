@@ -2,8 +2,9 @@
 #
 # measured: GATE for live operation. While false, every value below is a PLACEHOLDER,
 # sim mode warns, and live mode refuses to run. Set to true ONLY after measuring the rig
-# and filling in the real numbers. Still false: the gripper open/closed %s are not measured yet.
-measured: false
+# and filling in the real numbers. Set true 2026-10-25: square, gaps, piece dims and every
+# per-piece gripper hold are measured (live still needs --live and operator approval).
+measured: true
 
 # Edge length of one square (center-to-center spacing). MEASURED 2026-10-24: 56 mm.
 square_size: 0.056
@@ -48,7 +49,7 @@ piece_stem_diameters:
 # Fingertip (IK target) height for a top-down grasp, per piece. Derived 2026-10-24 as
 # (stem/neck height) - (gripper tip->pad-center, ~23 mm), floored at ~3 mm board clearance so the
 # jaw tips do not scrape. King/queen/rook land the pad center on the neck; pawn/bishop/knight have
-# low necks so they floor to a near-tip grasp (tips ~3 mm off the board) — the marginal grasps.
+# low necks so they floor to a near-tip grasp (tips ~3 mm off the board): the marginal grasps.
 grasp_height:
   pawn: 0.003
   knight: 0.003
@@ -59,7 +60,7 @@ grasp_height:
 
 # Gripper closing position (percent) that firmly holds each piece type. The hold value DIFFERS
 # per piece (stem diameter), so it's recorded per type here. Measure each with
-# scripts/gripper_read.py (close on that piece's stem). Fill the nulls to help flip measured:true.
+# scripts/gripper_read.py (close on that piece's stem), then tighten live as needed.
 gripper_closed_pct:
   pawn: 1.7      # 3.10 by hand 2026-10-25; live: needs a very tight hold, 1.7 holds (operator)
   knight: 2.0    # 9.25 by hand 2026-10-25; tightened step by step; operator set 2.0

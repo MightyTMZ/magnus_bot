@@ -34,20 +34,20 @@ sits at the rank-8 edge (`human_color: black`, flippable).
   validated against `board.legal_moves`.
 
 ## Repo map
-- `configs/` — board.yaml, arms.yaml, handoff.yaml (all PLACEHOLDER; `measured: false`).
+- `configs/` — board.yaml, arms.yaml, handoff.yaml, grasp.yaml (rig measured; `measured: true`).
 - `src/magnus_bot/geometry/` — board squares, arm frames, transforms.
 - `src/magnus_bot/kinematics/` — joint model, analytic IK (stub, M1), reachability.
 - `src/magnus_bot/motion/` — safety clamps, pick/place primitives, min-jerk trajectory.
 - `src/magnus_bot/hardware/` — `Arm` protocol, `SimArm` (full), `LeRobotArm` (stub).
 - `src/magnus_bot/planning/` — move decomposition, arm assignment, handoff.
 - `src/magnus_bot/orchestration/` — state machine (pure), executor, closed-loop grasp tuning.
-- `src/magnus_bot/sources/` — Stockfish / CLI / RandomLegal / BoardSource (vision stub).
+- `src/magnus_bot/sources/` — Stockfish / chess.com / CLI / RandomLegal / BoardSource (vision stub).
 - `src/magnus_bot/vision/` — stdlib client for the vision server, transfer grading
   (`verify.py`), `SimulatedBoard`; plus the old in-process Camera/homography stubs.
 - `RF-DETR/` — vision service + calibration (its own venv `RF-DETR/.venv`; torch+CUDA).
-- `scripts/` — play_moves (real moves, camera-graded), reach_report, jog_arm, first_move, tune_grasp,
-  reach_probe, fit_arm_geometry,
-  calibrate_board, hardware_selftest.
+- `chess_com/` — Next.js + Steel browser bridge to a chess.com game (used by play_chess_com).
+- `scripts/` — play_moves (real moves, camera-graded), play_stockfish, play_chess_com, reach_report,
+  jog_arm, first_move, tune_grasp, reach_probe, fit_arm_geometry, calibrate_board, hardware_selftest.
 - `hardware/` — reference calibration + example self-test outputs (folded from arm_test).
 - `tests/`, `docs/`.
 

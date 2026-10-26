@@ -3,10 +3,10 @@
 The camera and RF-DETR run as their OWN process (``RF-DETR/vision_server.py``, in RF-DETR's
 venv): its torch 2.14 + CUDA cannot share an environment with lerobot's ``torch<2.12`` pin. The
 server publishes the latest per-square reading over localhost; this module is the core side of
-that link — plain data plus urllib, so magnus_bot never imports cv2 or torch.
+that link: plain data plus urllib, so magnus_bot never imports cv2 or torch.
 
 Squares are named as in python-chess (``"g3"``). Colors are ``"W"``, ``"B"``, or ``"?"``
-(occupied, color unknown — the detector's generic "pieces" class). The green-painted fingertip
+(occupied, color unknown; the detector's generic "pieces" class). The green-painted fingertip
 (``marker``) is a board position in SQUARES: x toward the h-file, y toward rank 8, origin at a1's
 outer corner (a1's center is (0.5, 0.5)); multiply by the square size for meters.
 """

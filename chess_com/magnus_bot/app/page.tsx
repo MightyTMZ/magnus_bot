@@ -41,7 +41,7 @@ export default function Home() {
           localStorage.removeItem("steelSession");
         }
 
-        // No valid session — create a new one
+        // No valid session: create a new one
         const res = await fetch("/api/steel", { method: "POST" });
         if (!res.ok) throw new Error("Failed to create session");
         const data = await res.json();
